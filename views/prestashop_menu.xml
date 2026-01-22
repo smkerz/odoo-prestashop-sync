@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Define the backend action in the same file as the menu to avoid load-order issues. -->
+    <record id="action_prestashop_backend" model="ir.actions.act_window">
+        <field name="name">Backends</field>
+        <field name="res_model">prestashop.backend</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Create your first PrestaShop backend.
+            </p>
+        </field>
+    </record>
+
+    <menuitem id="menu_prestashop_root" name="PrestaShop Connector" sequence="50"/>
+
+    <menuitem id="menu_prestashop_config" name="Configuration" parent="menu_prestashop_root" sequence="10"/>
+    <menuitem id="menu_prestashop_backends" name="Backends" parent="menu_prestashop_config" action="action_prestashop_backend" sequence="10"/>
+
+    <!-- Contacts section: only contacts imported from PrestaShop (customer mappings). -->
+    <menuitem id="menu_prestashop_contacts_root" name="Contacts" parent="menu_prestashop_root" sequence="15"/>
+    <menuitem id="menu_prestashop_contacts" name="Contacts Prestashop" parent="menu_prestashop_contacts_root" action="action_prestashop_contacts" sequence="10"/>
+    <menuitem id="menu_prestashop_contacts_config" name="Configuration" parent="menu_prestashop_contacts_root" action="action_prestashop_backend" sequence="20"/>
+    <menuitem id="menu_prestashop_contacts_logs" name="Logs" parent="menu_prestashop_contacts_root" action="action_prestashop_contact_logs" sequence="30"/>
+
+    <menuitem id="menu_prestashop_crons" name="Scheduled Actions" parent="menu_prestashop_config" action="action_prestashop_crons" sequence="30" groups="base.group_system"/>
+
+    <menuitem id="menu_prestashop_logs" name="Logs" parent="menu_prestashop_root" action="action_prestashop_log" sequence="20"/>
+</odoo>

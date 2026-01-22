@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_prestashop_log_tree" model="ir.ui.view">
+        <field name="name">prestashop.sync.log.tree</field>
+        <field name="model">prestashop.sync.log</field>
+        <field name="arch" type="xml">
+            <tree string="PrestaShop Sync Logs">
+                <field name="create_date"/>
+                <field name="backend_id"/>
+                <field name="operation"/>
+                <field name="status"/>
+                <field name="duration_sec"/>
+                <field name="prestashop_id"/>
+                <field name="message"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_prestashop_log_form" model="ir.ui.view">
+        <field name="name">prestashop.sync.log.form</field>
+        <field name="model">prestashop.sync.log</field>
+        <field name="arch" type="xml">
+            <form string="Sync Log">
+                <sheet>
+                    <group>
+                        <field name="backend_id"/>
+                        <field name="operation"/>
+                        <field name="status"/>
+                        <field name="duration_sec"/>
+                        <field name="prestashop_id"/>
+                        <field name="message"/>
+                        <field name="details" nolabel="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_prestashop_log" model="ir.actions.act_window">
+        <field name="name">Logs</field>
+        <field name="res_model">prestashop.sync.log</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+</odoo>

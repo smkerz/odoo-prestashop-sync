@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_prestashop_crons" model="ir.actions.act_window">
+        <field name="name">PrestaShop Scheduled Actions</field>
+        <field name="res_model">ir.cron</field>
+        <field name="view_mode">tree,form</field>
+        <field name="domain">[('name', 'ilike', 'PrestaShop:')]</field>
+        <field name="context">{'active_test': False}</field>
+    </record>
+</odoo>

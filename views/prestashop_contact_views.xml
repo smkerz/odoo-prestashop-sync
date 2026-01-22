@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Contacts imported from PrestaShop (via customer mapping) -->
+
+    <record id="view_prestashop_customer_map_tree" model="ir.ui.view">
+        <field name="name">prestashop.customer.map.tree</field>
+        <field name="model">prestashop.customer.map</field>
+        <field name="arch" type="xml">
+            <tree string="PrestaShop Contacts" create="false" delete="false">
+                <field name="backend_id"/>
+                <field name="prestashop_id" string="Presta ID"/>
+                <field name="partner_name" string="Name"/>
+                <field name="partner_email" string="Email"/>
+                <field name="partner_phone" string="Phone"/>
+                <field name="partner_id" string="Contact"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_prestashop_customer_map_form" model="ir.ui.view">
+        <field name="name">prestashop.customer.map.form</field>
+        <field name="model">prestashop.customer.map</field>
+        <field name="arch" type="xml">
+            <form string="PrestaShop Contact" create="false" delete="false">
+                <sheet>
+                    <group>
+                        <field name="backend_id" readonly="1"/>
+                        <field name="prestashop_id" readonly="1"/>
+                        <field name="partner_id" readonly="1"/>
+                        <field name="partner_email" readonly="1"/>
+                        <field name="partner_phone" readonly="1"/>
+                    </group>
+                    <group>
+                        <separator string="Notes"/>
+                        <div class="oe_read_only">
+                            <p>
+                                This list shows only contacts that have been imported from PrestaShop (customer mappings).
+                                Use this screen to quickly access the corresponding Odoo contact.
+                            </p>
+                        </div>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_prestashop_customer_map_search" model="ir.ui.view">
+        <field name="name">prestashop.customer.map.search</field>
+        <field name="model">prestashop.customer.map</field>
+        <field name="arch" type="xml">
+            <search string="Search PrestaShop Contacts">
+                <field name="backend_id"/>
+                <field name="prestashop_id"/>
+                <field name="partner_name"/>
+                <field name="partner_email"/>
+                <field name="partner_phone"/>
+                <filter string="Active" name="active" domain="[('active','=',True)]"/>
+                <group expand="0" string="Group By">
+                    <filter string="Backend" name="group_by_backend" context="{'group_by':'backend_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_prestashop_contacts" model="ir.actions.act_window">
+        <field name="name">PrestaShop Contacts</field>
+        <field name="res_model">prestashop.customer.map</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No PrestaShop contacts yet.
+            </p>
+            <p>
+                Import customers from a backend to see them here.
+            </p>
+        </field>
+    </record>
+
+    <record id="action_prestashop_contact_logs" model="ir.actions.act_window">
+        <field name="name">PrestaShop Contact Logs</field>
+        <field name="res_model">prestashop.sync.log</field>
+        <field name="view_mode">tree,form</field>
+        <field name="domain">[("operation","in",["import_customers","reimport_customer","sync_addresses","preview_consents","sync_consents","sync_email_marketing","push_opt_out_to_prestashop","sync_consents_odoo_to_prestashop"]) ]</field>
+    </record>
+</odoo>

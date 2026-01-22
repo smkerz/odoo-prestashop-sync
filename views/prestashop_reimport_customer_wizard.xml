@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_prestashop_reimport_customer_wizard_form" model="ir.ui.view">
+        <field name="name">prestashop.reimport.customer.wizard.form</field>
+        <field name="model">prestashop.reimport.customer.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Reimport Customer by Presta ID">
+                <group>
+                    <field name="backend_id" invisible="1"/>
+                    <field name="prestashop_customer_id"/>
+                </group>
+                <footer>
+                    <button name="action_reimport" type="object" string="Reimport" class="btn-primary"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

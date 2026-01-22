@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        Scheduled actions are shipped INACTIVE by default.
+        Activate them manually when you are ready (Settings > Technical > Automation > Scheduled Actions).
+    -->
+
+    <record id="ir_cron_prestashop_import_customers" model="ir.cron">
+        <field name="name">PrestaShop: Import Customers</field>
+        <field name="model_id" ref="model_prestashop_backend"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_import_customers()</field>
+        <field name="active">False</field>
+        <field name="interval_number">6</field>
+        <field name="interval_type">hours</field>
+        <field name="numbercall">-1</field>
+    </record>
+
+    <record id="ir_cron_prestashop_import_orders" model="ir.cron">
+        <field name="name">PrestaShop: Import Orders</field>
+        <field name="model_id" ref="model_prestashop_backend"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_import_orders()</field>
+        <field name="active">False</field>
+        <field name="interval_number">15</field>
+        <field name="interval_type">minutes</field>
+        <field name="numbercall">-1</field>
+    </record>
+
+    <record id="ir_cron_prestashop_sync_addresses" model="ir.cron">
+        <field name="name">PrestaShop: Full Scan Customer Addresses (Weekly)</field>
+        <field name="model_id" ref="model_prestashop_backend"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_full_scan_addresses_weekly()</field>
+        <field name="active">False</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">weeks</field>
+        <field name="numbercall">-1</field>
+    </record>
+
+    <record id="ir_cron_prestashop_sync_consents" model="ir.cron">
+        <field name="name">PrestaShop: Sync Consents (Presta -> Odoo)</field>
+        <field name="model_id" ref="model_prestashop_backend"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_sync_consents()</field>
+        <field name="active">False</field>
+        <field name="interval_number">2</field>
+        <field name="interval_type">hours</field>
+        <field name="numbercall">-1</field>
+    </record>
+
+    <record id="ir_cron_prestashop_push_opt_outs" model="ir.cron">
+        <field name="name">PrestaShop: Sync Consents (Odoo -> Presta)</field>
+        <field name="model_id" ref="model_prestashop_backend"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_push_opt_outs_to_prestashop()</field>
+        <field name="active">False</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">hours</field>
+        <field name="numbercall">-1</field>
+    </record>
+
+</odoo>
