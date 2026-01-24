@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
+import hashlib
+import hmac
+import json
 import logging
 import re
 import time
 import zlib
 from datetime import timedelta
 from dateutil.relativedelta import relativedelta
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from odoo import api, fields, models, _
+from odoo import SUPERUSER_ID, api, fields, models, _
 from odoo.exceptions import UserError
 
 from .prestashop_client import PrestaShopClient, PrestaShopAPIError
+import requests
 
 _logger = logging.getLogger(__name__)
 
@@ -24,6 +28,20 @@ class PrestashopBackend(models.Model):
     name = fields.Char(required=True, default="PrestaShop")
     base_url = fields.Char(required=True, help="Example: https://shop.example.com")
     api_key = fields.Char(required=True, help="PrestaShop Webservice key")
+    webhook_secret = fields.Char(
+        string="Webhook Secret",
+        help="Shared secret used to validate PrestaShop webhook signatures."
+    )
+    webhook_url = fields.Char(
+        string="Webhook URL",
+        help="Public Odoo webhook endpoint URL (e.g. https://odoo.example.com/prestashop/webhook/consents)."
+    )
+    webhook_url_auto = fields.Char(
+        string="Webhook URL (auto)",
+        compute="_compute_webhook_url_auto",
+        store=False,
+        help="Auto-generated webhook URL including db=... for this Odoo instance."
+    )
 
     verify_tls = fields.Boolean(default=True, help="Disable only for testing with self-signed certificates.")
     timeout = fields.Integer(default=30)
@@ -94,6 +112,29 @@ class PrestashopBackend(models.Model):
         """
         for rec in self:
             rec.order_import_enabled = False
+
+    @api.depends()
+    def _compute_webhook_url_auto(self):
+        """Compute webhook URL based on web.base.url configuration.
+
+        Recommended setup for multi-DB with webhooks:
+        1. Set dbfilter = ^%d$ in odoo.conf
+        2. Set web.base.url to the subdomain for each database:
+           - DB 'mydb' -> https://mydb.odoo17.example.com
+           - DB 'prod' -> https://prod.odoo17.example.com
+        3. The webhook URL will be automatically correct.
+        """
+        for rec in self:
+            base_url = self.env["ir.config_parameter"].sudo().get_param("web.base.url") or ""
+            base_url = base_url.strip()
+
+            if not base_url:
+                rec.webhook_url_auto = False
+                continue
+
+            # Utilise l'URL telle quelle depuis web.base.url
+            webhook_url = f"{base_url.rstrip('/')}/prestashop/webhook/consents"
+            rec.webhook_url_auto = webhook_url
 
     paid_state_ids = fields.Char(
         string="Paid state IDs (optional)",
@@ -237,6 +278,22 @@ class PrestashopBackend(models.Model):
             vals["duration_sec"] = float(duration_sec)
         self.env["prestashop.sync.log"].sudo().create(vals)
 
+    def _log_outside_tx(self, operation, status, message, details=None, prestashop_id=None):
+        """Create a log entry that survives the current transaction rollback."""
+        self.ensure_one()
+        vals = {
+            "backend_id": self.id,
+            "operation": operation,
+            "status": status,
+            "message": message,
+            "details": details or "",
+            "prestashop_id": prestashop_id or "",
+        }
+        with self.env.registry.cursor() as cr:
+            env = api.Environment(cr, SUPERUSER_ID, {})
+            env["prestashop.sync.log"].sudo().create(vals)
+            cr.commit()
+
     def _lock_key(self, operation: str) -> int:
         """Return a stable 32-bit advisory lock key for this backend + operation."""
         self.ensure_one()
@@ -284,6 +341,97 @@ class PrestashopBackend(models.Model):
             "tag": "display_notification",
             "params": {"title": _("PrestaShop"), "message": _("Connection successful."), "sticky": False},
         }
+
+    def _ensure_webhook_db_param(self, url):
+        """Ensure webhook URL has db parameter if needed.
+
+        With multi-instance setup (each domain -> own dbfilter),
+        the db parameter is no longer needed. Just return URL as-is.
+        """
+        return url
+
+    def action_test_webhook(self):
+        self.ensure_one()
+        self._log_outside_tx("sync_consents", "warning", "Webhook test started")
+        if not self.webhook_secret:
+            raise UserError(_("Please set the Webhook Secret first."))
+
+        # Use webhook_url if manually set, otherwise fall back to webhook_url_auto (computed from web.base.url)
+        url = (self.webhook_url or self.webhook_url_auto or "").strip()
+        if not url:
+            raise UserError(_("Please configure web.base.url in System Parameters or set the Webhook URL manually."))
+        url = self._ensure_webhook_db_param(url)
+
+        payload = {
+            "backend_id": self.id,
+            "customer_id": "0",
+            "email": "test-webhook@example.invalid",
+            "newsletter": 1,
+            "optin": 0,
+            "updated_at": fields.Datetime.now().strftime(DT_FMT),
+            "shop_id": str(self.id),
+            "shop_url": self.base_url or "",
+        }
+        body = json.dumps(payload).encode("utf-8")
+        signature = hmac.new(
+            self.webhook_secret.encode("utf-8"),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+
+        try:
+            resp = requests.post(
+                url,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Prestashop-Signature": signature,
+                    "X-Odoo-Webhook-Test": "1",
+                },
+                timeout=self.timeout or 30,
+                verify=bool(self.verify_tls),
+            )
+        except Exception as e:
+            self._log_outside_tx("sync_consents", "error", "Webhook test failed", details=str(e))
+            raise UserError(_("Webhook test failed: %s") % e)
+
+        if resp.status_code >= 300:
+            details = f"url={url}\nresp={resp.text[:1000]}"
+            if resp.status_code == 404:
+                try:
+                    parts = urlparse(url)
+                    ping_url = urlunparse(parts._replace(path="/prestashop/webhook/ping"))
+                    ping_resp = requests.post(
+                        ping_url,
+                        data=body,
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Prestashop-Signature": signature,
+                            "X-Odoo-Webhook-Test": "1",
+                        },
+                        timeout=self.timeout or 30,
+                        verify=bool(self.verify_tls),
+                    )
+                    details += f"\nping_url={ping_url}\nping_status={ping_resp.status_code}"
+                except Exception as e:
+                    details += f"\nping_error={e}"
+
+            self._log_outside_tx(
+                "sync_consents",
+                "error",
+                f"Webhook test failed (HTTP {resp.status_code})",
+                details=details,
+            )
+            raise UserError(_("Webhook test failed (HTTP %s): %s") % (resp.status_code, resp.text))
+
+        self._log_outside_tx("sync_consents", "ok", "Webhook test successful", details=f"url={url}")
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {"title": _("PrestaShop"), "message": _("Webhook test successful."), "sticky": False},
+        }
+
 
     def action_import_orders(self):
         for backend in self:
@@ -674,6 +822,132 @@ class PrestashopBackend(models.Model):
             "newsletter": sync_one_list(list_news, desired_news),
             "offers": sync_one_list(list_offers, desired_offers),
         }
+
+    def _apply_webhook_consents(self, payload: dict):
+        """Apply consent changes received from a PrestaShop webhook."""
+        self.ensure_one()
+
+        email = (payload.get("email") or "").strip().lower()
+        if not email:
+            self._log("sync_consents", "warning", "Webhook: missing email", details=str(payload))
+            return {"status": "error", "message": "missing email"}
+
+        def to_bool(val):
+            return str(val).strip().lower() in ("1", "true", "yes", "y")
+
+        newsletter = 1 if to_bool(payload.get("newsletter")) else 0
+        optin = 1 if to_bool(payload.get("optin")) else 0
+
+        Partner = self.env["res.partner"].sudo()
+        partner = Partner.search([("email", "=ilike", email)], limit=1)
+        if not partner:
+            self._log("sync_consents", "warning", "Webhook: partner not found", details=email)
+            return {"status": "skipped", "message": "partner not found"}
+
+        def update_tag(tag, enabled):
+            if not tag:
+                return
+            if enabled:
+                partner.write({"category_id": [(4, tag.id)]})
+            else:
+                partner.write({"category_id": [(3, tag.id)]})
+
+        update_tag(self.newsletter_tag_id, bool(newsletter))
+        update_tag(self.partner_offers_tag_id, bool(optin))
+
+        if newsletter and self.newsletter_revoked_tag_id:
+            partner.write({"category_id": [(3, self.newsletter_revoked_tag_id.id)]})
+        if optin and self.partner_offers_revoked_tag_id:
+            partner.write({"category_id": [(3, self.partner_offers_revoked_tag_id.id)]})
+
+        try:
+            MailingContact = self.env["mailing.contact"].sudo()
+        except KeyError:
+            return {"status": "ok", "message": "mailing not installed"}
+
+        if "list_ids" not in MailingContact._fields:
+            return {"status": "ok", "message": "mailing model unsupported"}
+
+        list_news = self._ensure_mailing_list("newsletter")
+        list_offers = self._ensure_mailing_list("offers")
+
+        mc = MailingContact.search([("email", "=ilike", email)], limit=1)
+        if not mc:
+            mc = MailingContact.create({"name": partner.name or email, "email": email})
+
+        blacklisted = False
+        try:
+            Blacklist = self.env["mail.blacklist"].sudo()
+            if "email_normalized" in Blacklist._fields:
+                blacklisted = bool(Blacklist.search([("email_normalized", "=", email)], limit=1))
+            else:
+                blacklisted = bool(Blacklist.search([("email", "=ilike", email)], limit=1))
+        except KeyError:
+            blacklisted = False
+
+        globally_blocked = False
+        if blacklisted:
+            globally_blocked = True
+        if self.respect_odoo_opt_out and ("opt_out" in mc._fields) and bool(mc.opt_out):
+            globally_blocked = True
+
+        def _subscription_model():
+            for model_name in ("mailing.contact.subscription", "mailing.list.contact", "mailing.subscription"):
+                try:
+                    m = self.env[model_name].sudo()
+                    if ("list_id" in m._fields) and ("contact_id" in m._fields or "mailing_contact_id" in m._fields):
+                        return m
+                except KeyError:
+                    continue
+            return None
+
+        Sub = _subscription_model()
+        contact_field = None
+        opt_field = None
+        if Sub:
+            contact_field = "contact_id" if "contact_id" in Sub._fields else "mailing_contact_id"
+            if "opt_out" in Sub._fields:
+                opt_field = "opt_out"
+            elif "unsubscribed" in Sub._fields:
+                opt_field = "unsubscribed"
+
+        def set_subscription(list_rec, subscribe: bool):
+            if not Sub or not opt_field or not contact_field:
+                if subscribe and list_rec not in mc.list_ids:
+                    mc.write({"list_ids": [(4, list_rec.id)]})
+                if not subscribe and list_rec in mc.list_ids:
+                    mc.write({"list_ids": [(3, list_rec.id)]})
+                return
+
+            sub = Sub.search([("list_id", "=", list_rec.id), (contact_field, "=", mc.id)], limit=1)
+            if subscribe:
+                if sub and getattr(sub, opt_field):
+                    sub.write({opt_field: False})
+                if list_rec not in mc.list_ids:
+                    mc.write({"list_ids": [(4, list_rec.id)]})
+            else:
+                if sub:
+                    if not getattr(sub, opt_field):
+                        sub.write({opt_field: True})
+                elif list_rec in mc.list_ids:
+                    mc.write({"list_ids": [(3, list_rec.id)]})
+
+        if globally_blocked:
+            set_subscription(list_news, False)
+            set_subscription(list_offers, False)
+            self._log("sync_consents", "warning", "Webhook blocked by opt-out/blacklist", details=email)
+            return {"status": "blocked", "message": "opt-out or blacklist"}
+
+        set_subscription(list_news, bool(newsletter))
+        set_subscription(list_offers, bool(optin))
+
+        self._log(
+            "sync_consents",
+            "ok",
+            "Webhook consents applied",
+            details=f"email={email}, newsletter={newsletter}, optin={optin}",
+        )
+        return {"status": "ok"}
 
     def _push_opt_outs_to_prestashop(self, client):
         """Push Odoo-side consent revocations to PrestaShop.

@@ -20,6 +20,7 @@
                             <div class="fw-bold mb-2">Connexion</div>
                             <div class="d-flex flex-wrap gap-2">
                                 <button name="action_test_connection" type="object" string="Test" class="btn btn-primary"/>
+                                <button name="action_test_webhook" type="object" string="Webhook" class="btn btn-secondary"/>
                                 <button type="action" name="%(prestashop_connector_basic.action_prestashop_crons)d" string="Crons" class="btn btn-secondary" groups="base.group_system"/>
                             </div>
                         </div>
@@ -57,15 +58,24 @@
                             <field name="name"/>
                             <field name="base_url"/>
                             <field name="api_key" password="True"/>
-                            <field name="order_import_enabled" invisible="1"/>
-                            <field name="verify_tls"/>
-                            <field name="timeout"/>
                         </group>
                         <group>
                             <field name="company_id"/>
                             <field name="pricelist_id"/>
                             <field name="warehouse_id"/>
                             <field name="team_id"/>
+                        </group>
+                    </group>
+
+                    <group>
+                        <group string="Webhook Configuration">
+                            <field name="webhook_url_auto" readonly="1" widget="CopyClipboardChar"
+                                   placeholder="Configurez web.base.url dans les paramètres système"/>
+                            <field name="webhook_secret" password="True"/>
+                            <field name="webhook_url" invisible="1"/>
+                            <field name="order_import_enabled" invisible="1"/>
+                            <field name="verify_tls"/>
+                            <field name="timeout"/>
                         </group>
                     </group>
 
