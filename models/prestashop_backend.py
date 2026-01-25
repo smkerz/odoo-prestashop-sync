@@ -996,8 +996,12 @@ class PrestashopBackend(models.Model):
         if not partner:
             # Try to create the customer automatically if customer_id is provided
             customer_id = payload.get("customer_id", "").strip()
-            if customer_id:
-                partner = self._fetch_and_create_customer_from_webhook(customer_id)
+            # Only try to create if customer_id is valid (not 0 or empty)
+            if customer_id and customer_id != "0":
+                try:
+                    partner = self._fetch_and_create_customer_from_webhook(customer_id)
+                except Exception as e:
+                    self._log("sync_consents", "error", f"Webhook: failed to create customer {customer_id}", details=str(e))
 
             if not partner:
                 self._log("sync_consents", "warning", "Webhook: partner not found and could not be created", details=email)
