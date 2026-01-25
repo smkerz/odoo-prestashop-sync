@@ -1112,6 +1112,122 @@ class PrestashopBackend(models.Model):
         )
         return {"status": "ok"}
 
+    def _apply_webhook_address(self, payload):
+        """Handle address webhook from PrestaShop.
+
+        Actions:
+        - create: Fetch address from PrestaShop and create child partner in Odoo
+        - update: Fetch address from PrestaShop and update child partner in Odoo
+        - delete: Delete child partner from Odoo via address mapping
+        """
+        self.ensure_one()
+
+        action = payload.get("action", "").strip().lower()
+        customer_id = payload.get("customer_id", "").strip()
+        address_id = payload.get("address_id", "").strip()
+
+        if not customer_id or not address_id:
+            self._log("sync_addresses", "warning", "Webhook address: missing customer_id or address_id", details=str(payload))
+            return {"status": "error", "message": "missing customer_id or address_id"}
+
+        # For test webhooks with address_id="0", skip processing
+        if address_id == "0":
+            self._log("sync_addresses", "info", "Webhook address: skipped test address_id=0")
+            return {"status": "ok", "message": "test webhook"}
+
+        # Find customer mapping to get parent partner
+        customer_map = self.env["prestashop.customer.map"].sudo().search([
+            ("backend_id", "=", self.id),
+            ("prestashop_id", "=", customer_id),
+        ], limit=1)
+
+        if not customer_map:
+            self._log("sync_addresses", "warning", f"Webhook address: customer mapping not found for customer_id={customer_id}")
+            return {"status": "skipped", "message": "customer not found in mappings"}
+
+        parent_partner = customer_map.partner_id
+        if not parent_partner:
+            self._log("sync_addresses", "warning", f"Webhook address: parent partner not found for customer_id={customer_id}")
+            return {"status": "skipped", "message": "parent partner not found"}
+
+        # Handle delete action
+        if action == "delete":
+            address_map = self.env["prestashop.address.map"].sudo().search([
+                ("backend_id", "=", self.id),
+                ("prestashop_id", "=", address_id),
+            ], limit=1)
+
+            if address_map:
+                address_partner = address_map.address_partner_id
+                address_map.sudo().unlink()
+                if address_partner:
+                    address_partner.sudo().unlink()
+                self._log("sync_addresses", "ok", f"Webhook address deleted: address_id={address_id}")
+                return {"status": "ok", "message": "address deleted"}
+            else:
+                self._log("sync_addresses", "info", f"Webhook address: address_id={address_id} not found for deletion")
+                return {"status": "ok", "message": "address not found"}
+
+        # Handle create/update actions
+        if action in ("create", "update"):
+            try:
+                client = self._client()
+
+                # Fetch address from PrestaShop
+                addr_node = client.get_address(address_id)
+                if addr_node is None:
+                    self._log("sync_addresses", "warning", f"Webhook address: address_id={address_id} not found in PrestaShop")
+                    return {"status": "skipped", "message": "address not found in PrestaShop"}
+
+                # Build country/state cache for this single address
+                country_cache = {}
+                state_cache = {}
+
+                # Process the address
+                vals = self._vals_from_presta_address(client, addr_node, parent_partner, country_cache, state_cache)
+                if not vals:
+                    self._log("sync_addresses", "warning", f"Webhook address: could not build vals for address_id={address_id}")
+                    return {"status": "error", "message": "could not build address values"}
+
+                # Check if address mapping exists
+                address_map = self.env["prestashop.address.map"].sudo().search([
+                    ("backend_id", "=", self.id),
+                    ("prestashop_id", "=", address_id),
+                ], limit=1)
+
+                if address_map:
+                    # Update existing address
+                    address_partner = address_map.address_partner_id
+                    if address_partner:
+                        address_partner.sudo().write(vals)
+                        self._log("sync_addresses", "ok", f"Webhook address updated: address_id={address_id}")
+                        return {"status": "ok", "message": "address updated"}
+                    else:
+                        # Mapping exists but partner was deleted - recreate
+                        address_partner = self.env["res.partner"].sudo().create(vals)
+                        address_map.sudo().write({"address_partner_id": address_partner.id})
+                        self._log("sync_addresses", "ok", f"Webhook address recreated: address_id={address_id}")
+                        return {"status": "ok", "message": "address recreated"}
+                else:
+                    # Create new address
+                    address_partner = self.env["res.partner"].sudo().create(vals)
+                    self.env["prestashop.address.map"].sudo().create({
+                        "backend_id": self.id,
+                        "prestashop_id": address_id,
+                        "address_partner_id": address_partner.id,
+                        "parent_partner_id": parent_partner.id,
+                    })
+                    self._log("sync_addresses", "ok", f"Webhook address created: address_id={address_id}")
+                    return {"status": "ok", "message": "address created"}
+
+            except Exception as e:
+                self._log("sync_addresses", "error", f"Webhook address failed for address_id={address_id}", details=str(e))
+                return {"status": "error", "message": str(e)}
+
+        # Unknown action
+        self._log("sync_addresses", "warning", f"Webhook address: unknown action={action}")
+        return {"status": "error", "message": f"unknown action: {action}"}
+
     def _push_opt_outs_to_prestashop(self, client):
         """Push Odoo-side consent revocations to PrestaShop.
 

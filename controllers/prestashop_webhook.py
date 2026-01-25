@@ -79,6 +79,61 @@ class PrestashopWebhookController(http.Controller):
         )
         return request.make_json_response(res or {"status": "ok"})
 
+    @http.route(
+        "/prestashop/webhook/addresses",
+        type="http",
+        auth="public",
+        methods=["GET", "POST", "OPTIONS"],
+        csrf=False,
+        website=False,
+    )
+    def webhook_addresses(self, **kwargs):
+        _logger.info(
+            "Webhook addresses hit: method=%s path=%s",
+            request.httprequest.method,
+            request.httprequest.path,
+        )
+        if request.httprequest.method != "POST":
+            return request.make_json_response({"status": "ok", "message": "use POST"})
+        body = request.httprequest.data or b""
+        if not body:
+            return request.make_json_response({"status": "error", "message": "empty body"}, status=400)
+
+        signature = request.httprequest.headers.get("X-Prestashop-Signature", "")
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except Exception:
+            return request.make_json_response({"status": "error", "message": "invalid json"}, status=400)
+
+        backend = self._find_backend(payload)
+        if not backend or not backend.webhook_secret:
+            _logger.warning("Webhook addresses: backend not found. payload=%s", payload)
+            return request.make_json_response({"status": "error", "message": "backend not found"}, status=400)
+
+        expected = hmac.new(
+            backend.webhook_secret.encode("utf-8"),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+
+        if not hmac.compare_digest(expected, signature):
+            backend._log(
+                "sync_addresses",
+                "warning",
+                "Webhook addresses: invalid signature",
+                details=f"path={request.httprequest.path}",
+            )
+            return request.make_json_response({"status": "error", "message": "invalid signature"}, status=401)
+
+        res = backend.sudo()._apply_webhook_address(payload)
+        backend._log(
+            "sync_addresses",
+            "ok",
+            "Webhook address received",
+            details=f"path={request.httprequest.path} action={payload.get('action', 'unknown')}",
+        )
+        return request.make_json_response(res or {"status": "ok"})
+
     def _find_backend(self, payload):
         Backend = request.env["prestashop.backend"].sudo()
         backend_id = payload.get("backend_id")
