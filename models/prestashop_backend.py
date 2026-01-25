@@ -351,85 +351,163 @@ class PrestashopBackend(models.Model):
         return url
 
     def action_test_webhook(self):
+        """Complete bidirectional webhook test.
+
+        This test validates:
+        1. PrestaShop API is accessible
+        2. PrestaShop module has webhook configured
+        3. PrestaShop webhook URL matches Odoo URL
+        4. PrestaShop webhook secret matches Odoo secret
+        5. PrestaShop can send webhooks to Odoo
+        6. Odoo can receive and validate webhooks
+        """
         self.ensure_one()
         self._log_outside_tx("sync_consents", "warning", "Webhook test started")
+
         if not self.webhook_secret:
             raise UserError(_("Please set the Webhook Secret first."))
 
-        # Use webhook_url if manually set, otherwise fall back to webhook_url_auto (computed from web.base.url)
-        url = (self.webhook_url or self.webhook_url_auto or "").strip()
-        if not url:
-            raise UserError(_("Please configure web.base.url in System Parameters or set the Webhook URL manually."))
-        url = self._ensure_webhook_db_param(url)
+        # 1. Verify PrestaShop connection
+        if not self.base_url or not self.api_key:
+            raise UserError(_("Please configure PrestaShop connection (URL + API key) before testing webhook."))
 
-        payload = {
-            "backend_id": self.id,
-            "customer_id": "0",
-            "email": "test-webhook@example.invalid",
-            "newsletter": 1,
-            "optin": 0,
-            "updated_at": fields.Datetime.now().strftime(DT_FMT),
-            "shop_id": str(self.id),
-            "shop_url": self.base_url or "",
-        }
-        body = json.dumps(payload).encode("utf-8")
-        signature = hmac.new(
-            self.webhook_secret.encode("utf-8"),
-            body,
-            hashlib.sha256,
-        ).hexdigest()
+        client = self._client()
+        try:
+            client.get_xml("languages", params={"display": "[id]"})
+        except PrestaShopAPIError as e:
+            self._log_outside_tx("sync_consents", "error", "Webhook test aborted: PrestaShop connection failed", details=str(e))
+            raise UserError(_("PrestaShop connection failed. Fix this before testing webhook:\n\n%s") % e)
+
+        # 2. Get expected Odoo webhook URL
+        self.invalidate_recordset(['webhook_url_auto'])
+        odoo_webhook_url = (self.webhook_url or self.webhook_url_auto or "").strip()
+
+        if not odoo_webhook_url:
+            raise UserError(_("Please configure web.base.url in System Parameters or set the Webhook URL manually."))
+
+        odoo_webhook_url = self._ensure_webhook_db_param(odoo_webhook_url)
+
+        # 3. Read PrestaShop module webhook configuration
+        prestashop_config_url = f"{self.base_url.rstrip('/')}/module/prestashopodoo/webhookconfig?ws_key={self.api_key}"
 
         try:
-            resp = requests.post(
-                url,
-                data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Prestashop-Signature": signature,
-                    "X-Odoo-Webhook-Test": "1",
-                },
+            config_resp = requests.get(
+                prestashop_config_url,
                 timeout=self.timeout or 30,
                 verify=bool(self.verify_tls),
             )
         except Exception as e:
-            self._log_outside_tx("sync_consents", "error", "Webhook test failed", details=str(e))
-            raise UserError(_("Webhook test failed: %s") % e)
+            self._log_outside_tx("sync_consents", "error", "Failed to read PrestaShop webhook config", details=str(e))
+            raise UserError(_(
+                "Could not read PrestaShop webhook configuration.\n\n"
+                "Make sure the PrestaShop module has the webhook config endpoint installed.\n\n"
+                "Error: %s"
+            ) % e)
 
-        if resp.status_code >= 300:
-            details = f"url={url}\nresp={resp.text[:1000]}"
-            if resp.status_code == 404:
-                try:
-                    parts = urlparse(url)
-                    ping_url = urlunparse(parts._replace(path="/prestashop/webhook/ping"))
-                    ping_resp = requests.post(
-                        ping_url,
-                        data=body,
-                        headers={
-                            "Content-Type": "application/json",
-                            "X-Prestashop-Signature": signature,
-                            "X-Odoo-Webhook-Test": "1",
-                        },
-                        timeout=self.timeout or 30,
-                        verify=bool(self.verify_tls),
-                    )
-                    details += f"\nping_url={ping_url}\nping_status={ping_resp.status_code}"
-                except Exception as e:
-                    details += f"\nping_error={e}"
+        if config_resp.status_code != 200:
+            self._log_outside_tx("sync_consents", "error", f"PrestaShop webhook config endpoint returned {config_resp.status_code}", details=config_resp.text[:500])
+            raise UserError(_(
+                "PrestaShop webhook config endpoint failed (HTTP %s).\n\n"
+                "Make sure the PrestaShop module webhook endpoints are installed.\n\n"
+                "Response: %s"
+            ) % (config_resp.status_code, config_resp.text[:200]))
 
-            self._log_outside_tx(
-                "sync_consents",
-                "error",
-                f"Webhook test failed (HTTP {resp.status_code})",
-                details=details,
+        try:
+            presta_config = config_resp.json()
+        except Exception as e:
+            raise UserError(_("Invalid JSON response from PrestaShop webhook config: %s") % e)
+
+        presta_webhook_url = (presta_config.get('webhook_url') or '').strip()
+        presta_webhook_secret = (presta_config.get('webhook_secret') or '').strip()
+        presta_backend_id = presta_config.get('backend_id')
+
+        # 4. Validate configuration matches
+        issues = []
+
+        if not presta_webhook_url:
+            issues.append("❌ PrestaShop webhook URL is not configured")
+        elif presta_webhook_url != odoo_webhook_url:
+            issues.append(f"❌ Webhook URL mismatch:\n  • Odoo:       {odoo_webhook_url}\n  • PrestaShop: {presta_webhook_url}")
+
+        if not presta_webhook_secret:
+            issues.append("❌ PrestaShop webhook secret is not configured")
+        elif presta_webhook_secret != self.webhook_secret:
+            issues.append("❌ Webhook secret mismatch between Odoo and PrestaShop")
+
+        if presta_backend_id and str(presta_backend_id) != str(self.id):
+            issues.append(f"⚠️  Backend ID mismatch: Odoo={self.id}, PrestaShop={presta_backend_id}")
+
+        if issues:
+            error_msg = "Webhook configuration issues found:\n\n" + "\n\n".join(issues)
+            error_msg += f"\n\n📋 Expected configuration in PrestaShop module:\n"
+            error_msg += f"  • URL:        {odoo_webhook_url}\n"
+            error_msg += f"  • Secret:     {self.webhook_secret[:8]}... ({len(self.webhook_secret)} chars)\n"
+            error_msg += f"  • Backend ID: {self.id}"
+
+            self._log_outside_tx("sync_consents", "error", "Webhook config validation failed", details=error_msg)
+            raise UserError(_(error_msg))
+
+        # 5. Trigger webhook test from PrestaShop
+        prestashop_test_url = f"{self.base_url.rstrip('/')}/module/prestashopodoo/webhooktest?ws_key={self.api_key}"
+
+        try:
+            test_resp = requests.post(
+                prestashop_test_url,
+                timeout=self.timeout or 30,
+                verify=bool(self.verify_tls),
             )
-            raise UserError(_("Webhook test failed (HTTP %s): %s") % (resp.status_code, resp.text))
+        except Exception as e:
+            self._log_outside_tx("sync_consents", "error", "Failed to trigger PrestaShop webhook test", details=str(e))
+            raise UserError(_(
+                "Could not trigger webhook test from PrestaShop.\n\n"
+                "Make sure the PrestaShop module has the webhook test endpoint installed.\n\n"
+                "Error: %s"
+            ) % e)
 
-        self._log_outside_tx("sync_consents", "ok", "Webhook test successful", details=f"url={url}")
+        if test_resp.status_code != 200:
+            self._log_outside_tx("sync_consents", "error", f"PrestaShop webhook test endpoint returned {test_resp.status_code}", details=test_resp.text[:500])
+            raise UserError(_(
+                "PrestaShop webhook test failed (HTTP %s).\n\n"
+                "Response: %s"
+            ) % (test_resp.status_code, test_resp.text[:500]))
+
+        try:
+            test_result = test_resp.json()
+        except Exception as e:
+            raise UserError(_("Invalid JSON response from PrestaShop webhook test: %s") % e)
+
+        # 6. Validate test result
+        if test_result.get('status') != 'success':
+            error_details = f"HTTP {test_result.get('http_code')}: {test_result.get('error') or test_result.get('response', '')}"
+            self._log_outside_tx("sync_consents", "error", "PrestaShop → Odoo webhook test failed", details=error_details)
+            raise UserError(_(
+                "Webhook test from PrestaShop to Odoo failed.\n\n"
+                "PrestaShop could not send webhook to Odoo.\n\n"
+                "Details: %s"
+            ) % error_details)
+
+        # Success!
+        success_msg = (
+            f"✅ Complete webhook test successful!\n\n"
+            f"Validated:\n"
+            f"  • PrestaShop API connection\n"
+            f"  • Webhook URL matches: {odoo_webhook_url}\n"
+            f"  • Webhook secret matches\n"
+            f"  • PrestaShop → Odoo webhook delivery\n"
+            f"  • Odoo webhook signature validation"
+        )
+
+        self._log_outside_tx("sync_consents", "ok", "Complete webhook test successful", details=success_msg)
 
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
-            "params": {"title": _("PrestaShop"), "message": _("Webhook test successful."), "sticky": False},
+            "params": {
+                "title": _("PrestaShop Webhook Test"),
+                "message": _(success_msg),
+                "sticky": False,
+                "type": "success",
+            },
         }
 
 
@@ -823,6 +901,81 @@ class PrestashopBackend(models.Model):
             "offers": sync_one_list(list_offers, desired_offers),
         }
 
+    def _fetch_and_create_customer_from_webhook(self, prestashop_id: str):
+        """Fetch customer from PrestaShop and create/update in Odoo.
+
+        This is a lightweight version of _reimport_customer_by_presta_id()
+        optimized for webhook calls (doesn't sync Email Marketing lists,
+        returns partner or None instead of raising errors).
+
+        Returns:
+            res.partner or None
+        """
+        self.ensure_one()
+
+        try:
+            client = self._client()
+            tag = self._ensure_customer_tag()
+
+            node = client.get_customer(str(prestashop_id))
+            if node is None:
+                self._log("webhook_create_customer", "warning", f"Customer {prestashop_id} not found in PrestaShop")
+                return None
+
+            prestashop_id = client._text(node.find("id")) or str(prestashop_id)
+            email = client._text(node.find("email"))
+            firstname = client._text(node.find("firstname"))
+            lastname = client._text(node.find("lastname"))
+            active = client._text(node.find("active"))
+            is_guest = client._text(node.find("is_guest"))
+
+            if (not self.include_guest_customers) and is_guest == "1":
+                self._log("webhook_create_customer", "info", f"Customer {prestashop_id} is a guest; skipped")
+                return None
+
+            # Check if mapping exists
+            map_rec = self.env["prestashop.customer.map"].sudo().search([
+                ("backend_id", "=", self.id),
+                ("prestashop_id", "=", prestashop_id),
+            ], limit=1)
+
+            partner = map_rec.partner_id if map_rec else False
+            if (not partner) and email:
+                partner = self.env["res.partner"].sudo().search([("email", "=", email)], limit=1)
+
+            vals = {
+                "name": (" ".join([firstname, lastname])).strip() or email or f"PrestaShop Customer {prestashop_id}",
+                "email": email or False,
+                "active": False if active == "0" else True,
+                "customer_rank": 1,
+            }
+
+            if partner:
+                partner.sudo().write(vals)
+                partner.sudo().write({"category_id": [(4, tag.id)]})
+                if not map_rec:
+                    self.env["prestashop.customer.map"].sudo().create({
+                        "backend_id": self.id,
+                        "prestashop_id": prestashop_id,
+                        "partner_id": partner.id,
+                    })
+                self._log("webhook_create_customer", "ok", f"Customer {prestashop_id} updated via webhook")
+            else:
+                vals["category_id"] = [(6, 0, [tag.id])]
+                partner = self.env["res.partner"].sudo().create(vals)
+                self.env["prestashop.customer.map"].sudo().create({
+                    "backend_id": self.id,
+                    "prestashop_id": prestashop_id,
+                    "partner_id": partner.id,
+                })
+                self._log("webhook_create_customer", "ok", f"Customer {prestashop_id} created via webhook")
+
+            return partner
+
+        except Exception as e:
+            self._log("webhook_create_customer", "error", f"Failed to create customer {prestashop_id}: {str(e)}")
+            return None
+
     def _apply_webhook_consents(self, payload: dict):
         """Apply consent changes received from a PrestaShop webhook."""
         self.ensure_one()
@@ -841,8 +994,14 @@ class PrestashopBackend(models.Model):
         Partner = self.env["res.partner"].sudo()
         partner = Partner.search([("email", "=ilike", email)], limit=1)
         if not partner:
-            self._log("sync_consents", "warning", "Webhook: partner not found", details=email)
-            return {"status": "skipped", "message": "partner not found"}
+            # Try to create the customer automatically if customer_id is provided
+            customer_id = payload.get("customer_id", "").strip()
+            if customer_id:
+                partner = self._fetch_and_create_customer_from_webhook(customer_id)
+
+            if not partner:
+                self._log("sync_consents", "warning", "Webhook: partner not found and could not be created", details=email)
+                return {"status": "skipped", "message": "partner not found"}
 
         def update_tag(tag, enabled):
             if not tag:

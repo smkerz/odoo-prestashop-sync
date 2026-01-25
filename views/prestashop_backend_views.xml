@@ -181,7 +181,7 @@
                             </group>
                         </page>
 
-                        <page string="Orders">
+                        <page string="Orders" invisible="1">
                             <group>
                                 <field name="last_order_sync"/>
                                 <field name="order_sync_window_days"/>
