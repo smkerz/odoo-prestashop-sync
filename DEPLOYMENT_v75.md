@@ -40,7 +40,7 @@ Odoo: Adresse automatiquement créée/mise à jour/supprimée
    - Nouvelle méthode `sendAddressWebhook()` pour envoyer les webhooks
 
 2. **IMPORTANT:** Le module PrestaShop DOIT être mis à jour (nouvelle version avec hooks adresses)
-   - Nouveau MD5: `40df36ee8a895d2f01f9cdec475888b5`
+   - Nouveau MD5: `54b1c52dc399590752c042fdd0a76cdb`
    - Ancien MD5: `8c2a236aa5e63b17a8df8249992a12f0`
 
 ## Instructions de déploiement
@@ -79,7 +79,7 @@ sudo systemctl start odoo
 md5sum prestashopodoo.zip
 ```
 
-Si le MD5 n'est PAS `40df36ee8a895d2f01f9cdec475888b5`, alors vous DEVEZ mettre à jour:
+Si le MD5 n'est PAS `54b1c52dc399590752c042fdd0a76cdb`, alors vous DEVEZ mettre à jour:
 
 #### Mise à jour du module PrestaShop:
 
@@ -270,7 +270,7 @@ En cas de problème:
 1. Vérifier les logs Odoo: **PrestaShop → Logs** (opération: `sync_addresses`)
 2. Vérifier les logs système: `sudo journalctl -u odoo -f`
 3. Vérifier les logs PrestaShop: `var/logs/` dans PrestaShop
-4. Vérifier que le module PrestaShop est bien la version avec MD5 `40df36ee8a895d2f01f9cdec475888b5`
+4. Vérifier que le module PrestaShop est bien la version avec MD5 `54b1c52dc399590752c042fdd0a76cdb`
 
 ## Notes techniques
 

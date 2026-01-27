@@ -53,11 +53,14 @@ def create_zip():
                 if should_exclude(filepath):
                     continue
 
-                # Calculate relative path
-                relpath = filepath.relative_to(SOURCE_DIR.parent)
+                # Calculate relative path from SOURCE_DIR
+                relpath = filepath.relative_to(SOURCE_DIR)
+
+                # Build arcname with correct module name
+                arcname = f"prestashopodoo/{relpath}"
 
                 # Convert to forward slashes for ZIP
-                arcname = str(relpath).replace("\\", "/")
+                arcname = arcname.replace("\\", "/")
 
                 # Add file to ZIP
                 print(f"Adding: {arcname}")
