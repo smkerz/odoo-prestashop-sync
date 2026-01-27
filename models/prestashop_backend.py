@@ -1604,7 +1604,14 @@ class PrestashopBackend(models.Model):
                 if iso:
                     rec = self.env["res.country"].sudo().search([("code", "=", iso.upper())], limit=1)
                     country_id = rec.id if rec else False
-        except Exception:
+                    if not country_id:
+                        _logger.warning(f"Country ISO {iso} not found in Odoo for PrestaShop country_id={presta_country_id}")
+                else:
+                    _logger.warning(f"No iso_code in PrestaShop country_id={presta_country_id}")
+            else:
+                _logger.warning(f"PrestaShop country_id={presta_country_id} returned None")
+        except Exception as e:
+            _logger.error(f"Error fetching country {presta_country_id}: {e}", exc_info=True)
             country_id = False
         cache[presta_country_id] = country_id
         return country_id
@@ -1633,7 +1640,12 @@ class PrestashopBackend(models.Model):
                 if not state_rec_id and name:
                     rec = State.search([("country_id", "=", country_id), ("name", "=ilike", name)], limit=1)
                     state_rec_id = rec.id if rec else False
-        except Exception:
+                if not state_rec_id:
+                    _logger.warning(f"State not found in Odoo: iso={iso}, name={name}, country_id={country_id}, presta_state_id={presta_state_id}")
+            else:
+                _logger.warning(f"PrestaShop state_id={presta_state_id} returned None")
+        except Exception as e:
+            _logger.error(f"Error fetching state {presta_state_id}: {e}", exc_info=True)
             state_rec_id = False
         cache[key] = state_rec_id
         return state_rec_id
