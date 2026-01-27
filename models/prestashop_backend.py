@@ -2368,36 +2368,16 @@ class PrestashopBackend(models.Model):
                 "partner_id": partner.id,
             })
 
+        # Only update phone on main contact - addresses are managed via child contacts (sync_addresses)
         if id_address_delivery:
             try:
                 addr = client.get_address(id_address_delivery)
                 if addr is not None:
-                    street = client._text(addr.find("address1"))
-                    street2 = client._text(addr.find("address2"))
-                    city = client._text(addr.find("city"))
-                    zip_code = client._text(addr.find("postcode"))
                     phone = client._text(addr.find("phone")) or client._text(addr.find("phone_mobile"))
-                    id_country = client._text(addr.find("id_country"))
-
-                    country_id = False
-                    if id_country:
-                        country = client.get_country(id_country)
-                        if country is not None:
-                            iso = client._text(country.find("iso_code"))
-                            if iso:
-                                country_rec = self.env["res.country"].search([("code", "=", iso.upper())], limit=1)
-                                country_id = country_rec.id if country_rec else False
-
-                    partner.write({
-                        "street": street or partner.street,
-                        "street2": street2 or partner.street2,
-                        "city": city or partner.city,
-                        "zip": zip_code or partner.zip,
-                        "phone": phone or partner.phone,
-                        "country_id": country_id or partner.country_id.id,
-                    })
+                    if phone and not partner.phone:
+                        partner.write({"phone": phone})
             except Exception as e:
-                self._log("import_orders", "warning", "Failed to update partner address", details=str(e), prestashop_id=prestashop_order_id)
+                self._log("import_orders", "warning", "Failed to update partner phone", details=str(e), prestashop_id=prestashop_order_id)
 
         return partner
 
