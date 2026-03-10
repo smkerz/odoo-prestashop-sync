@@ -80,6 +80,6 @@
         <field name="name">PrestaShop Contact Logs</field>
         <field name="res_model">prestashop.sync.log</field>
         <field name="view_mode">tree,form</field>
-        <field name="domain">[("operation","in",["import_customers","reimport_customer","sync_addresses","preview_consents","sync_consents","sync_email_marketing","push_opt_out_to_prestashop","sync_consents_odoo_to_prestashop"]) ]</field>
+        <field name="domain">[("operation","in",["import_customers","sync_addresses","preview_consents","sync_consents","sync_email_marketing","sync_consents_odoo_to_prestashop","webhook_create_customer"])]</field>
     </record>
 </odoo>

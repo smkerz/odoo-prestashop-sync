@@ -22,6 +22,7 @@
                                 <button name="action_test_connection" type="object" string="Test" class="btn btn-primary"/>
                                 <button name="action_test_webhook" type="object" string="Webhook" class="btn btn-secondary"/>
                                 <button type="action" name="%(prestashop_connector_basic.action_prestashop_crons)d" string="Crons" class="btn btn-secondary" groups="base.group_system"/>
+                                <button name="action_purge_logs" type="object" string="Purge Logs" class="btn btn-outline-danger" confirm="Supprimer tous les logs de ce backend ?"/>
                             </div>
                         </div>
 
@@ -83,54 +84,175 @@
 
                         <page string="Manuel &amp; Politique">
                             <group col="1">
-                                <separator string="But du module"/>
+
+                                <!-- ========== 1. BUT DU MODULE ========== -->
+                                <separator string="1. But du module"/>
                                 <div>
                                     <p>
                                         Ce connecteur synchronise <strong>clients</strong>, <strong>consentements marketing</strong> et <strong>adresses</strong>
-                                        depuis PrestaShop 1.7 vers Odoo 17. L’objectif est d’utiliser <strong>Odoo Email Marketing</strong> pour piloter les campagnes
+                                        entre PrestaShop 1.7 et Odoo 17. L'objectif est d'utiliser <strong>Odoo Email Marketing</strong> pour piloter les campagnes
                                         (listes, désinscriptions, blacklist), tout en gardant PrestaShop cohérent.
                                     </p>
-                                    <ul>
-                                        <li><strong>Contacts :</strong> import des clients PrestaShop dans <em>Contacts</em> (res.partner).</li>
-                                        <li><strong>Tag :</strong> une seule étiquette est maintenue : <strong>Client Prestashop</strong>.</li>
-                                        <li><strong>Email Marketing :</strong> 2 listes par backend : <em>Newsletter</em> et <em>Offres partenaires (optin)</em>.</li>
-                                        <li><strong>Adresses :</strong> création/mise à jour d’adresses de livraison/facturation en sous-contacts.</li>
-                                    </ul>
                                 </div>
 
-                                <separator string="Boutons du backend"/>
+                                <!-- ========== 2. DIRECTION DE SYNCHRONISATION ========== -->
+                                <separator string="2. Direction de synchronisation"/>
                                 <div>
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Donnée</th>
+                                                <th>PrestaShop → Odoo</th>
+                                                <th>Odoo → PrestaShop</th>
+                                                <th>Mode</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td><strong>Clients</strong></td>
+                                                <td>Oui (import)</td>
+                                                <td>Non</td>
+                                                <td>Manuel (bouton Import) ou Cron</td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>Adresses</strong></td>
+                                                <td>Oui</td>
+                                                <td>Non</td>
+                                                <td>Automatique (webhook temps réel) + Manuel (bouton Sync)</td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>Consentements (newsletter/optin)</strong></td>
+                                                <td>Oui (inscriptions + retraits)</td>
+                                                <td>Oui (révocations uniquement, jamais 0→1)</td>
+                                                <td>Manuel (boutons Presta→Odoo / Odoo→Presta)</td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>Commandes</strong></td>
+                                                <td>Prévu (pas encore actif)</td>
+                                                <td>Non</td>
+                                                <td>-</td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>Produits</strong></td>
+                                                <td>Prévu (pas encore actif)</td>
+                                                <td>Non</td>
+                                                <td>-</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <p class="text-muted">
+                                        <strong>Principe clé :</strong> PrestaShop est la source principale pour les clients et adresses (les clients
+                                        gèrent leurs données sur le site e-commerce). Odoo reçoit les données. Les adresses ne sont <strong>jamais</strong>
+                                        écrites sur le contact principal Odoo ; elles sont gérées uniquement via les <strong>sous-contacts</strong>
+                                        (onglet « Contacts &amp; Adresses »).
+                                    </p>
+                                </div>
+
+                                <!-- ========== 3. WEBHOOKS (TEMPS RÉEL) ========== -->
+                                <separator string="3. Webhooks (synchronisation temps réel)"/>
+                                <div>
+                                    <p>
+                                        Le module PrestaShop <strong>prestashopodoo</strong> (installé côté PrestaShop) envoie des webhooks
+                                        vers Odoo à chaque modification d'adresse ou de consentement. Les webhooks sont signés avec
+                                        <strong>HMAC-SHA256</strong> pour garantir l'authenticité.
+                                    </p>
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Événement PrestaShop</th>
+                                                <th>Action dans Odoo</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td>Client crée une adresse</td>
+                                                <td>Création d'un sous-contact (contact enfant)</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Client modifie une adresse</td>
+                                                <td>Mise à jour du sous-contact correspondant</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Client supprime une adresse</td>
+                                                <td>Suppression du sous-contact dans Odoo</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <p>
+                                        <strong>Configuration requise (côté PrestaShop) :</strong>
+                                    </p>
                                     <ul>
-                                        <li><strong>Test Connection</strong> : vérifie l’URL et la clé Webservice PrestaShop.</li>
-                                        <li><strong>Scheduled Actions</strong> : raccourci vers les crons du module (désactivés par défaut).</li>
-                                        <li><strong>Import Customers</strong> : import/MAJ des clients (mapping ID PrestaShop, sinon email).</li>
-                                        <li><strong>Reimport Customer by Presta ID</strong> : réimporte un client précis, même s’il a été supprimé.</li>
-                                        <li><strong>Sync Addresses</strong> : synchronise les adresses (livraison + facturation) du côté PrestaShop.</li>
-                                        <li><strong>Preview Consents</strong> : simulation (aucune écriture) des changements de consentements.</li>
-                                        <li><strong>Sync Consents (Presta → Odoo)</strong> : met à jour les listes Email Marketing dans Odoo.</li>
-                                        <li><strong>Sync Consents (Odoo → PrestaShop)</strong> : pousse uniquement des <em>révocations</em> (jamais 0→1).</li>
-                                        <li><strong>Orders</strong> : la partie commandes sera traitée plus tard (bouton retiré pour éviter toute confusion).</li>
+                                        <li><strong>Webhook URL</strong> : l'URL Odoo affichée dans « Webhook URL (auto) » ci-dessus.</li>
+                                        <li><strong>Webhook Secret</strong> : doit être <strong>identique</strong> dans Odoo et PrestaShop.</li>
+                                        <li><strong>Backend ID</strong> : l'ID du backend Odoo (visible dans l'URL de cette page).</li>
+                                    </ul>
+                                    <p class="text-muted">
+                                        <strong>Note :</strong> la clé API (Api Key) et le Webhook Secret sont deux choses différentes.
+                                        La clé API authentifie Odoo auprès de PrestaShop. Le Webhook Secret signe les messages envoyés
+                                        par PrestaShop vers Odoo.
+                                    </p>
+                                </div>
+
+                                <!-- ========== 4. BOUTONS DU BACKEND ========== -->
+                                <separator string="4. Boutons du backend"/>
+                                <div>
+                                    <p><strong>Connexion :</strong></p>
+                                    <ul>
+                                        <li><strong>Test</strong> : vérifie l'URL et la clé Webservice PrestaShop.</li>
+                                        <li><strong>Webhook</strong> : teste la configuration webhook de bout en bout (vérifie URL, secret, backend ID, puis envoie un webhook de test).</li>
+                                        <li><strong>Crons</strong> : raccourci vers les actions planifiées du module (désactivées par défaut).</li>
+                                    </ul>
+                                    <p><strong>Customers :</strong></p>
+                                    <ul>
+                                        <li><strong>Import</strong> : import/MAJ des clients PrestaShop (mapping par ID PrestaShop, sinon par email). N'importe pas les adresses.</li>
+                                        <li><strong>Réimport ID</strong> : réimporte un client précis par son ID PrestaShop, même s'il a été supprimé dans Odoo.</li>
+                                        <li><strong>Adresses</strong> : synchronisation manuelle de toutes les adresses. Utile pour le premier import ou pour rattraper des adresses manquées. Après le premier import, les webhooks gèrent la sync en temps réel.</li>
+                                    </ul>
+                                    <p><strong>Consents :</strong></p>
+                                    <ul>
+                                        <li><strong>Preview</strong> : simulation (aucune écriture) des changements de consentements.</li>
+                                        <li><strong>Presta → Odoo</strong> : met à jour les listes Email Marketing dans Odoo depuis PrestaShop.</li>
+                                        <li><strong>Odoo → Presta</strong> : pousse les <em>révocations</em> vers PrestaShop (jamais de 0→1).</li>
                                     </ul>
                                 </div>
 
-                                <separator string="Options importantes"/>
+                                <!-- ========== 5. GESTION DES ADRESSES ========== -->
+                                <separator string="5. Gestion des adresses"/>
+                                <div>
+                                    <p>
+                                        Les adresses sont stockées comme <strong>sous-contacts</strong> (contacts enfants avec parent_id)
+                                        dans l'onglet « Contacts &amp; Adresses » de la fiche client. Le contact principal ne contient
+                                        <strong>pas</strong> d'adresse directement.
+                                    </p>
+                                    <ul>
+                                        <li><strong>Premier import :</strong> cliquer « Import » (clients) puis « Adresses » (sync manuelle).</li>
+                                        <li><strong>Ensuite :</strong> les webhooks synchronisent automatiquement les créations, modifications et suppressions d'adresses en temps réel.</li>
+                                        <li><strong>Pays et États :</strong> le module mappe automatiquement les pays/états PrestaShop vers Odoo via le code ISO. La clé API doit avoir les droits GET sur <em>countries</em> et <em>states</em>.</li>
+                                    </ul>
+                                </div>
+
+                                <!-- ========== 6. OPTIONS IMPORTANTES ========== -->
+                                <separator string="6. Options importantes"/>
                                 <div>
                                     <ul>
                                         <li><strong>Customer sync window days</strong> : fenêtre de sécurité lors des imports.</li>
                                         <li><strong>Batch size / max per run</strong> : limite la charge (pratique en prod).</li>
                                         <li><strong>Include guest customers</strong> : inclut les invités (si ton PrestaShop en crée).</li>
                                         <li><strong>Respect Odoo opt-out</strong> : empêche toute réinscription si Odoo a désinscrit/blacklisté.</li>
-                                        <li><strong>Address limits</strong> : bornes pour éviter un gros run d’adresses.</li>
+                                        <li><strong>Address limits</strong> : bornes pour éviter un gros run d'adresses.</li>
+                                        <li><strong>Verify TLS</strong> : active la vérification SSL pour les appels vers PrestaShop.</li>
+                                        <li><strong>Timeout</strong> : délai maximum (en secondes) pour les appels API.</li>
                                     </ul>
                                 </div>
 
-                                <separator string="Politique de synchronisation des consentements"/>
+                                <!-- ========== 7. POLITIQUE DE SYNCHRONISATION DES CONSENTEMENTS ========== -->
+                                <separator string="7. Politique de synchronisation des consentements"/>
                                 <div>
                                     <p>
-                                        <strong>Principe :</strong> Odoo est la référence pour l’envoi (désinscriptions/blacklist). PrestaShop reste cohérent via un
+                                        <strong>Principe :</strong> Odoo est la référence pour l'envoi (désinscriptions/blacklist). PrestaShop reste cohérent via un
                                         retour des révocations. Le connecteur ne pousse <strong>jamais</strong> de 0→1 côté PrestaShop.
                                     </p>
-                                    <table class="table table-sm">
+                                    <table class="table table-sm table-bordered">
                                         <thead>
                                             <tr>
                                                 <th>Situation (côté Odoo)</th>
@@ -162,22 +284,118 @@
                                         </tbody>
                                     </table>
                                     <p>
-                                        <strong>Important :</strong> retirer un contact d’une liste Odoo est traité comme une <strong>désinscription de cette liste</strong>.
+                                        <strong>Important :</strong> retirer un contact d'une liste Odoo est traité comme une <strong>désinscription de cette liste</strong>.
                                         Si tu veux faire de la segmentation sans retirer le consentement, utilise des filtres/segments plutôt que de retirer de la liste.
                                     </p>
                                 </div>
 
-                                <separator string="Pré-requis PrestaShop"/>
+                                <!-- ========== 8. PRÉ-REQUIS ========== -->
+                                <separator string="8. Pré-requis"/>
                                 <div>
+                                    <p><strong>Côté PrestaShop (Webservice) :</strong></p>
                                     <ul>
-                                        <li><strong>Webservice PrestaShop</strong> : activer le Webservice et utiliser une clé avec les droits nécessaires.</li>
-                                        <li><strong>Customers</strong> : droits <strong>GET</strong> (import clients) et <strong>PUT</strong> (push des révocations newsletter/optin depuis Odoo).</li>
-                                        <li><strong>Addresses</strong> : droits <strong>GET</strong> (sync des adresses livraison/facturation).</li>
-                                        <li><strong>Countries</strong> et <strong>States</strong> : droits <strong>GET</strong> (le module lit l’ISO code / nom pour mapper vers les pays/états Odoo).</li>
-                                        <li><strong>Languages</strong> : droits <strong>GET</strong> (test de connexion et lecture des langues si disponible).</li>
-                                        <li>Éviter les modules Presta qui réécrivent newsletter/optin « en dur » (sinon incohérences d’affichage).</li>
+                                        <li>Activer le <strong>Webservice</strong> (Paramètres avancés → Webservice).</li>
+                                        <li>Créer une clé avec les droits suivants :</li>
+                                    </ul>
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Ressource</th>
+                                                <th>GET</th>
+                                                <th>PUT</th>
+                                                <th>Utilisation</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td>customers</td>
+                                                <td>Oui</td>
+                                                <td>Oui</td>
+                                                <td>Import clients + push révocations consentements</td>
+                                            </tr>
+                                            <tr>
+                                                <td>addresses</td>
+                                                <td>Oui</td>
+                                                <td>Non</td>
+                                                <td>Sync des adresses</td>
+                                            </tr>
+                                            <tr>
+                                                <td>countries</td>
+                                                <td>Oui</td>
+                                                <td>Non</td>
+                                                <td>Mapping pays (code ISO)</td>
+                                            </tr>
+                                            <tr>
+                                                <td>states</td>
+                                                <td>Oui</td>
+                                                <td>Non</td>
+                                                <td>Mapping états/régions (code ISO)</td>
+                                            </tr>
+                                            <tr>
+                                                <td>languages</td>
+                                                <td>Oui</td>
+                                                <td>Non</td>
+                                                <td>Test de connexion</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <p><strong>Côté PrestaShop (Module webhook) :</strong></p>
+                                    <ul>
+                                        <li>Installer le module <strong>prestashopodoo</strong> (v1.1.0+).</li>
+                                        <li>Configurer : Webhook URL, Secret, Backend ID.</li>
+                                        <li>Le module utilise la même clé Webservice pour authentifier les endpoints de configuration.</li>
+                                    </ul>
+                                    <p><strong>Côté Odoo :</strong></p>
+                                    <ul>
+                                        <li>Configurer <strong>web.base.url</strong> dans les paramètres système (pour générer l'URL webhook).</li>
+                                        <li>Le Webhook Secret doit être <strong>identique</strong> dans Odoo et dans le module PrestaShop.</li>
                                     </ul>
                                 </div>
+
+                                <!-- ========== 9. CRONS ========== -->
+                                <separator string="9. Tâches planifiées (Crons)"/>
+                                <div>
+                                    <p>Tous les crons sont <strong>inactifs par défaut</strong>. Activez-les via le bouton <strong>Crons</strong> dans la section Connexion.</p>
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Cron</th>
+                                                <th>Fréquence</th>
+                                                <th>Description</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td>Import Customers</td>
+                                                <td>6 heures</td>
+                                                <td>Importe les nouveaux clients depuis PrestaShop</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Consents Presta → Odoo</td>
+                                                <td>2 heures</td>
+                                                <td>Synchronise les consentements newsletter/optin de PrestaShop vers les listes Email Marketing Odoo</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Consents Odoo → Presta</td>
+                                                <td>1 heure</td>
+                                                <td>Pousse les désinscriptions Odoo vers PrestaShop (révocation uniquement, ne réabonne jamais)</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Full Scan Addresses</td>
+                                                <td>Hebdomadaire</td>
+                                                <td>Scan complet des adresses de tous les clients mappés</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <p><strong>Sécurité :</strong></p>
+                                    <ul>
+                                        <li><strong>Verrou PostgreSQL</strong> : si un cron est déjà en cours, le suivant est automatiquement ignoré (pas de double exécution).</li>
+                                        <li><strong>Odoo → Presta est revocation-only</strong> : il ne réabonne jamais un contact dans PrestaShop, il ne fait que désinscrire.</li>
+                                        <li><strong>respect_odoo_opt_out</strong> : si activé, les contacts blacklistés/opt-out dans Odoo ne seront jamais réinscrits par le sync Presta → Odoo.</li>
+                                    </ul>
+                                    <p><strong>Attention :</strong> il n'y a pas de rate limiting sur les appels API PrestaShop. En cas de désinscription en masse, lancez d'abord manuellement avec le bouton pour observer le volume.</p>
+                                </div>
+
                             </group>
                         </page>
 
@@ -208,34 +426,32 @@
                         </page>
                         <page string="Customers">
                             <group>
-                                <field name="last_customer_sync"/>
-                                <field name="customer_sync_window_days"/>
-                                <field name="customer_tag_id"/>
-                                <separator string="Consents"/>
-                                <field name="last_consents_sync" readonly="1"/>
-                                <field name="respect_odoo_opt_out"/>
-                                <field name="include_guest_customers"/>
-                                <field name="last_customer_presta_id" readonly="1"/>
-                                <field name="customer_batch_size"/>
-                                <field name="customer_max_per_run"/>
-
-                                <separator string="Addresses"/>
-                                <field name="last_address_sync" readonly="1"/>
-                                <field name="address_max_customers_per_run"/>
-                                <field name="address_max_addresses_per_run"/>
+                                <group>
+                                    <field name="last_customer_sync"/>
+                                    <field name="customer_sync_window_days"/>
+                                    <field name="customer_tag_id"/>
+                                    <field name="last_customer_presta_id" readonly="1"/>
+                                    <field name="customer_batch_size"/>
+                                    <field name="customer_max_per_run"/>
+                                </group>
+                                <group>
+                                    <separator string="Consents"/>
+                                    <field name="last_consents_sync" readonly="1"/>
+                                    <field name="respect_odoo_opt_out"/>
+                                    <field name="include_guest_customers"/>
+                                    <separator string="Addresses"/>
+                                    <field name="last_address_sync" readonly="1"/>
+                                    <field name="address_max_customers_per_run"/>
+                                    <field name="address_max_addresses_per_run"/>
+                                </group>
                             </group>
-	                            <group>
-	                                <separator string="Notes"/>
-	                                <div class="oe_form_field oe_inline">
-                                    <p>
-                                        Imports customers from PrestaShop and applies the 'Client Prestashop' tag.
-                                        Matching is first done by PrestaShop ID (mapping), then by email if no mapping exists.
-                                    </p>
-                                </div>
-
-	                                
-                            </group>
-
+                            <separator string="Notes"/>
+                            <div>
+                                <p class="text-muted">
+                                    Importe les clients depuis PrestaShop et applique le tag « Client Prestashop ».
+                                    Le matching se fait d'abord par ID PrestaShop (mapping), puis par email si aucun mapping n'existe.
+                                </p>
+                            </div>
                         </page>
 
                     </notebook>

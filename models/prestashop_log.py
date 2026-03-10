@@ -10,20 +10,19 @@ class PrestashopSyncLog(models.Model):
     operation = fields.Selection([
         ("import_orders", "Import Orders"),
         ("import_customers", "Import Customers"),
-        ("import_products", "Import Products"),
-        ("reimport_customer", "Reimport Customer by Presta ID"),
-        ("sync_addresses", "Sync Customer Addresses"),
-        ("sync_newsletter_tags", "Sync Newsletter Tags"),
-        ("sync_partner_offers_tags", "Sync Partner Offers Tags"),
-        ("sync_newsletter_marketing", "Sync Newsletter to Email Marketing"),
-        ("sync_partner_offers_marketing", "Sync Partner Offers to Email Marketing"),
-        ("sync_email_marketing", "Sync Email Marketing Lists"),
+        ("sync_addresses", "Sync Addresses"),
+        ("sync_email_marketing", "Sync Email Marketing"),
         ("preview_consents", "Preview Consents"),
-        ("sync_consents", "Sync Consents"),
-        ("push_opt_out_to_prestashop", "Push Opt-outs to PrestaShop"),
-        ("sync_consents_odoo_to_prestashop", "Sync Consents Odoo -> PrestaShop"),
+        ("sync_consents", "Sync Consents (Webhook)"),
+        ("sync_consents_odoo_to_prestashop", "Consents Odoo → PrestaShop"),
+        ("webhook_create_customer", "Webhook Create Customer"),
     ], required=True)
-    status = fields.Selection([("ok", "OK"), ("warning", "Warning"), ("error", "Error")], required=True, default="ok")
+    status = fields.Selection([
+        ("ok", "OK"),
+        ("info", "Info"),
+        ("warning", "Warning"),
+        ("error", "Error"),
+    ], required=True, default="ok")
     message = fields.Char(required=True)
     details = fields.Text()
     prestashop_id = fields.Char(index=True)

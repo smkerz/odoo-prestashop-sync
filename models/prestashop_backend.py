@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
-import hashlib
-import hmac
-import json
 import logging
 import re
 import time
 import zlib
 from datetime import timedelta
 from dateutil.relativedelta import relativedelta
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import urlparse
 
 from odoo import SUPERUSER_ID, api, fields, models, _
 from odoo.exceptions import UserError
@@ -329,6 +326,17 @@ class PrestashopBackend(models.Model):
         finally:
             self._release_lock(lock_key)
 
+    def action_purge_logs(self):
+        """Delete all sync logs for this backend."""
+        self.ensure_one()
+        count = self.env["prestashop.sync.log"].sudo().search_count([("backend_id", "=", self.id)])
+        self.env["prestashop.sync.log"].sudo().search([("backend_id", "=", self.id)]).unlink()
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {"title": _("PrestaShop"), "message": _("%d logs deleted.") % count, "sticky": False},
+        }
+
     def action_test_connection(self):
         self.ensure_one()
         client = self._client()
@@ -341,14 +349,6 @@ class PrestashopBackend(models.Model):
             "tag": "display_notification",
             "params": {"title": _("PrestaShop"), "message": _("Connection successful."), "sticky": False},
         }
-
-    def _ensure_webhook_db_param(self, url):
-        """Ensure webhook URL has db parameter if needed.
-
-        With multi-instance setup (each domain -> own dbfilter),
-        the db parameter is no longer needed. Just return URL as-is.
-        """
-        return url
 
     def action_test_webhook(self):
         """Complete bidirectional webhook test.
@@ -384,8 +384,6 @@ class PrestashopBackend(models.Model):
 
         if not odoo_webhook_url:
             raise UserError(_("Please configure web.base.url in System Parameters or set the Webhook URL manually."))
-
-        odoo_webhook_url = self._ensure_webhook_db_param(odoo_webhook_url)
 
         # 3. Read PrestaShop module webhook configuration
         prestashop_config_url = f"{self.base_url.rstrip('/')}/module/prestashopodoo/webhookconfig?ws_key={self.api_key}"
@@ -600,33 +598,31 @@ class PrestashopBackend(models.Model):
         return (email or "").strip().lower()
 
 
-    def _opted_out_emails(self, emails):
-        """Return a set of normalized emails with opt_out=True in Odoo (mailing.contact)."""
-        self.ensure_one()
+    def _discover_subscription_field(self, model_or_record):
+        """Return the One2many subscription field name on mailing.contact, or None."""
+        for fname in ("subscription_list_ids", "list_contact_list_ids", "subscription_ids"):
+            if fname in model_or_record._fields:
+                return fname
+        return None
+
+    def _blacklisted_emails(self, emails):
+        """Return set of normalized emails that are blacklisted in Odoo (mail.blacklist)."""
+        blacklisted = set()
         try:
-            MailingContact = self.env["mailing.contact"].sudo()
+            Blacklist = self.env["mail.blacklist"].sudo()
+            if emails:
+                if "email_normalized" in Blacklist._fields:
+                    recs = Blacklist.search([("email_normalized", "in", list(emails))])
+                    for r in recs:
+                        blacklisted.add(self._norm_email(getattr(r, "email_normalized", None) or r.email))
+                else:
+                    recs = Blacklist.search([("email", "in", list(emails))])
+                    for r in recs:
+                        if r.email:
+                            blacklisted.add(self._norm_email(r.email))
         except KeyError:
-            return set()
-
-        if not emails:
-            return set()
-        normed = {self._norm_email(e) for e in emails if e}
-        normed.discard("")
-        if not normed:
-            return set()
-
-        mc = MailingContact.search([("email", "in", list(normed))])
-        opted = {self._norm_email(x.email) for x in mc if x.email and bool(getattr(x, "opt_out", False))}
-
-        # Case-insensitive fallback for edge cases
-        missing = [e for e in normed if e not in {self._norm_email(x.email) for x in mc if x.email}]
-        for e in missing:
-            x = MailingContact.search([("email", "=ilike", e)], limit=1)
-            if x and x.email and bool(getattr(x, "opt_out", False)):
-                opted.add(self._norm_email(x.email))
-
-        return opted
-
+            pass
+        return blacklisted
 
     def _website_label(self) -> str:
         """Return a stable label for this backend's website, based on base_url."""
@@ -737,9 +733,6 @@ class PrestashopBackend(models.Model):
             self._log("sync_email_marketing", "warning", "Failed to compute Partner Offers audience from PrestaShop.", details=str(e))
             desired_offers = set()
 
-        def norm_email(e):
-            return (e or "").strip().lower()
-
         try:
             MailingContact = self.env["mailing.contact"].sudo()
         except KeyError:
@@ -750,7 +743,7 @@ class PrestashopBackend(models.Model):
         # Build deterministic emails we care about
         p_by_email = {}
         for p in partners:
-            email = norm_email(p.email)
+            email = self._norm_email(p.email)
             if email and email not in p_by_email:
                 p_by_email[email] = p
 
@@ -758,7 +751,7 @@ class PrestashopBackend(models.Model):
 
         # Fetch mailing contacts (exact match), then case-insensitive fallback
         existing_mc = MailingContact.search([("email", "in", emails)]) if emails else MailingContact.browse()
-        mc_by_email = {norm_email(mc.email): mc for mc in existing_mc if mc.email}
+        mc_by_email = {self._norm_email(mc.email): mc for mc in existing_mc if mc.email}
 
         def get_or_create_mc(email: str, partner):
             mc = mc_by_email.get(email)
@@ -771,52 +764,17 @@ class PrestashopBackend(models.Model):
                 mc_by_email[email] = mc
             return mc
 
-        # Global blacklist (Odoo): blocks ALL marketing emails
-        blacklisted_emails = set()
-        try:
-            Blacklist = self.env["mail.blacklist"].sudo()
-            if emails:
-                if "email_normalized" in Blacklist._fields:
-                    recs = Blacklist.search([("email_normalized", "in", emails)])
-                    for r in recs:
-                        blacklisted_emails.add(norm_email(getattr(r, "email_normalized", None) or r.email))
-                else:
-                    recs = Blacklist.search([("email", "in", emails)])
-                    for r in recs:
-                        if r.email:
-                            blacklisted_emails.add(norm_email(r.email))
-        except KeyError:
-            blacklisted_emails = set()
-
-        # Per-list opt-out storage differs by Odoo versions.
-        def _subscription_model():
-            for model_name in ("mailing.contact.subscription", "mailing.list.contact", "mailing.subscription"):
-                try:
-                    m = self.env[model_name].sudo()
-                    if ("list_id" in m._fields) and ("contact_id" in m._fields or "mailing_contact_id" in m._fields):
-                        return m
-                except KeyError:
-                    continue
-            return None
-
-        Sub = _subscription_model()
-        contact_field = None
-        opt_field = None
-        if Sub:
-            contact_field = "contact_id" if "contact_id" in Sub._fields else "mailing_contact_id"
-            if "opt_out" in Sub._fields:
-                opt_field = "opt_out"
-            elif "unsubscribed" in Sub._fields:
-                opt_field = "unsubscribed"
+        blacklisted_emails = self._blacklisted_emails(emails)
+        sub_field_name = self._discover_subscription_field(MailingContact)
 
         def _is_list_opted_out(mc_rec, list_rec):
-            if not Sub or not opt_field or not contact_field:
+            """Check if contact has opt_out=True for a specific list."""
+            if not sub_field_name:
                 return False
-            try:
-                sub = Sub.search([("list_id", "=", list_rec.id), (contact_field, "=", mc_rec.id)], limit=1)
-            except Exception:
-                return False
-            return bool(sub and getattr(sub, opt_field))
+            for sub in getattr(mc_rec, sub_field_name, []):
+                if sub.list_id.id == list_rec.id:
+                    return bool(getattr(sub, "opt_out", False))
+            return False
 
         def is_globally_blocked(email: str, mc_rec=None):
             if email in blacklisted_emails:
@@ -872,21 +830,22 @@ class PrestashopBackend(models.Model):
                     if not mc:
                         continue
 
-                    if Sub and opt_field and contact_field:
-                        sub = Sub.search([("list_id", "=", list_rec.id), (contact_field, "=", mc.id)], limit=1)
-                        if sub and not getattr(sub, opt_field):
+                    # Set opt_out on subscription record, or remove from list
+                    sub = None
+                    if sub_field_name:
+                        for s in getattr(mc, sub_field_name, []):
+                            if s.list_id.id == list_rec.id:
+                                sub = s
+                                break
+                    if sub and hasattr(sub, "opt_out"):
+                        if not sub.opt_out:
                             if not preview:
-                                sub.write({opt_field: True})
+                                sub.write({"opt_out": True})
                             unsubscribe_actions += 1
-                        elif not sub and (list_rec in mc.list_ids):
-                            if not preview:
-                                mc.write({"list_ids": [(3, list_rec.id)]})
-                            unsubscribe_actions += 1
-                    else:
-                        if list_rec in mc.list_ids:
-                            if not preview:
-                                mc.write({"list_ids": [(3, list_rec.id)]})
-                            unsubscribe_actions += 1
+                    elif list_rec in mc.list_ids:
+                        if not preview:
+                            mc.write({"list_ids": [(3, list_rec.id)]})
+                        unsubscribe_actions += 1
 
             return {
                 "subscribe": subscribe_actions,
@@ -1038,62 +997,31 @@ class PrestashopBackend(models.Model):
         if not mc:
             mc = MailingContact.create({"name": partner.name or email, "email": email})
 
-        blacklisted = False
-        try:
-            Blacklist = self.env["mail.blacklist"].sudo()
-            if "email_normalized" in Blacklist._fields:
-                blacklisted = bool(Blacklist.search([("email_normalized", "=", email)], limit=1))
-            else:
-                blacklisted = bool(Blacklist.search([("email", "=ilike", email)], limit=1))
-        except KeyError:
-            blacklisted = False
-
-        globally_blocked = False
-        if blacklisted:
-            globally_blocked = True
+        globally_blocked = bool(self._blacklisted_emails([email]))
         if self.respect_odoo_opt_out and ("opt_out" in mc._fields) and bool(mc.opt_out):
             globally_blocked = True
 
-        def _subscription_model():
-            for model_name in ("mailing.contact.subscription", "mailing.list.contact", "mailing.subscription"):
-                try:
-                    m = self.env[model_name].sudo()
-                    if ("list_id" in m._fields) and ("contact_id" in m._fields or "mailing_contact_id" in m._fields):
-                        return m
-                except KeyError:
-                    continue
-            return None
-
-        Sub = _subscription_model()
-        contact_field = None
-        opt_field = None
-        if Sub:
-            contact_field = "contact_id" if "contact_id" in Sub._fields else "mailing_contact_id"
-            if "opt_out" in Sub._fields:
-                opt_field = "opt_out"
-            elif "unsubscribed" in Sub._fields:
-                opt_field = "unsubscribed"
+        _sub_fname = self._discover_subscription_field(mc)
 
         def set_subscription(list_rec, subscribe: bool):
-            if not Sub or not opt_field or not contact_field:
-                if subscribe and list_rec not in mc.list_ids:
-                    mc.write({"list_ids": [(4, list_rec.id)]})
-                if not subscribe and list_rec in mc.list_ids:
-                    mc.write({"list_ids": [(3, list_rec.id)]})
-                return
-
-            sub = Sub.search([("list_id", "=", list_rec.id), (contact_field, "=", mc.id)], limit=1)
+            sub = None
+            if _sub_fname:
+                for s in getattr(mc, _sub_fname, []):
+                    if s.list_id.id == list_rec.id:
+                        sub = s
+                        break
             if subscribe:
-                if sub and getattr(sub, opt_field):
-                    sub.write({opt_field: False})
+                if sub and hasattr(sub, "opt_out") and sub.opt_out:
+                    sub.write({"opt_out": False})
                 if list_rec not in mc.list_ids:
                     mc.write({"list_ids": [(4, list_rec.id)]})
             else:
-                if sub:
-                    if not getattr(sub, opt_field):
-                        sub.write({opt_field: True})
+                if sub and hasattr(sub, "opt_out"):
+                    if not sub.opt_out:
+                        sub.write({"opt_out": True})
                 elif list_rec in mc.list_ids:
                     mc.write({"list_ids": [(3, list_rec.id)]})
+
 
         if globally_blocked:
             set_subscription(list_news, False)
@@ -1245,96 +1173,89 @@ class PrestashopBackend(models.Model):
             MailingContact = self.env["mailing.contact"].sudo()
         except KeyError:
             raise UserError(_("Email Marketing (mass_mailing) is not installed."))
-        if "opt_out" not in MailingContact._fields:
-            raise UserError(_("Your Email Marketing model has no opt_out field; cannot enforce opt-outs."))
 
         maps = self.env["prestashop.customer.map"].sudo().search([("backend_id", "=", self.id)])
         if not maps:
             return 0, 0
 
-        def norm_email(e):
-            return (e or "").strip().lower()
-
-        # Ensure site-specific Email Marketing lists exist
         list_news = self._ensure_mailing_list("newsletter")
         list_offers = self._ensure_mailing_list("offers")
 
-        # Build unique emails -> customer ids
+        # Build PrestaShop ID -> email mapping
+        presta_to_email = {}
         email_to_customer_ids = {}
         for m in maps:
-            email = norm_email(m.partner_id.email)
+            email = self._norm_email(m.partner_id.email)
             if not email:
                 continue
+            presta_to_email[str(m.prestashop_id)] = email
             email_to_customer_ids.setdefault(email, set()).add(m.prestashop_id)
 
         emails = list(email_to_customer_ids.keys())
         if not emails:
             return 0, 0
 
-        mc = MailingContact.search([("email", "in", emails)])
-        mc_by_email = {norm_email(x.email): x for x in mc if x.email}
+        # Fetch current PrestaShop state: which customers have newsletter=1 / optin=1
+        presta_news_ids = set()
+        presta_offers_ids = set()
+        try:
+            presta_news_ids = set(client.list_newsletter_customer_ids(
+                batch_size=int(self.customer_batch_size or 200),
+                include_guests=bool(self.include_guest_customers),
+                max_total=int(self.customer_max_per_run or 5000),
+            ))
+        except Exception as e:
+            self._log("sync_consents_odoo_to_prestashop", "warning",
+                      "Failed to fetch newsletter subscribers from PrestaShop", details=str(e))
+        try:
+            presta_offers_ids = set(client.list_optin_customer_ids(
+                batch_size=int(self.customer_batch_size or 200),
+                include_guests=bool(self.include_guest_customers),
+                max_total=int(self.customer_max_per_run or 5000),
+            ))
+        except Exception as e:
+            self._log("sync_consents_odoo_to_prestashop", "warning",
+                      "Failed to fetch optin subscribers from PrestaShop", details=str(e))
 
-        # Case-insensitive fallback
+        # Emails that PrestaShop considers subscribed
+        presta_news_emails = {presta_to_email[i] for i in presta_news_ids if i in presta_to_email}
+        presta_offers_emails = {presta_to_email[i] for i in presta_offers_ids if i in presta_to_email}
+
+        # Fetch mailing contacts
+        mc = MailingContact.search([("email", "in", emails)])
+        mc_by_email = {self._norm_email(x.email): x for x in mc if x.email}
         for e in [x for x in emails if x not in mc_by_email]:
             x = MailingContact.search([("email", "=ilike", e)], limit=1)
             if x and x.email:
-                mc_by_email[norm_email(x.email)] = x
+                mc_by_email[self._norm_email(x.email)] = x
 
-        optout_by_email = {e: bool(rec.opt_out) for e, rec in mc_by_email.items()}
+        sub_field_name = self._discover_subscription_field(MailingContact)
 
-        # Global blacklist
-        blacklisted_emails = set()
-        try:
-            Blacklist = self.env["mail.blacklist"].sudo()
-            if "email_normalized" in Blacklist._fields:
-                recs = Blacklist.search([("email_normalized", "in", emails)])
-                for r in recs:
-                    blacklisted_emails.add(norm_email(getattr(r, "email_normalized", None) or r.email))
-            else:
-                recs = Blacklist.search([("email", "in", emails)])
-                for r in recs:
-                    if r.email:
-                        blacklisted_emails.add(norm_email(r.email))
-        except KeyError:
-            blacklisted_emails = set()
-
-        # Per-list unsubscriptions
-        def _subscription_model():
-            for model_name in ("mailing.contact.subscription", "mailing.list.contact", "mailing.subscription"):
-                try:
-                    m = self.env[model_name].sudo()
-                    if "list_id" not in m._fields:
-                        continue
-                    if ("contact_id" in m._fields) or ("mailing_contact_id" in m._fields):
-                        return m
-                except KeyError:
-                    continue
-            return None
-
-        Sub = _subscription_model()
-        contact_field = None
-        opt_field = None
-        if Sub:
-            contact_field = "contact_id" if "contact_id" in Sub._fields else "mailing_contact_id"
-            if "opt_out" in Sub._fields:
-                opt_field = "opt_out"
-            elif "unsubscribed" in Sub._fields:
-                opt_field = "unsubscribed"
-
-        def _list_unsubscribed(email: str, list_rec):
-            mc_rec = mc_by_email.get(email)
-            if not mc_rec:
+        def _is_subscribed(mc_rec, list_rec):
+            """Check if contact is actively subscribed (in list AND not opted out)."""
+            if list_rec not in mc_rec.list_ids:
                 return False
-            if Sub and opt_field and contact_field:
-                sub = Sub.search([("list_id", "=", list_rec.id), (contact_field, "=", mc_rec.id)], limit=1)
-                return bool(sub and getattr(sub, opt_field))
-            # Fallback: list relation missing means unsubscribed
-            return list_rec not in mc_rec.list_ids
+            if sub_field_name:
+                for sub in getattr(mc_rec, sub_field_name, []):
+                    if sub.list_id.id == list_rec.id:
+                        if getattr(sub, "opt_out", False):
+                            return False
+                        return True
+            return True
+
+        # Odoo list membership: emails actively subscribed to each list
+        odoo_news_emails = set()
+        odoo_offers_emails = set()
+        for email, mc_rec in mc_by_email.items():
+            if _is_subscribed(mc_rec, list_news):
+                odoo_news_emails.add(email)
+            if _is_subscribed(mc_rec, list_offers):
+                odoo_offers_emails.add(email)
+
+        blacklisted_emails = self._blacklisted_emails(emails)
 
         updated = 0
         errors = 0
-
-        updated_opt_out = 0
         updated_blacklist = 0
         updated_unsub_news = 0
         updated_unsub_offers = 0
@@ -1343,19 +1264,16 @@ class PrestashopBackend(models.Model):
             do_newsletter = None
             do_optin = None
 
-            if optout_by_email.get(email):
-                do_newsletter = 0
-                do_optin = 0
-                updated_opt_out += 1
-            elif email in blacklisted_emails:
+            if email in blacklisted_emails:
                 do_newsletter = 0
                 do_optin = 0
                 updated_blacklist += 1
             else:
-                if _list_unsubscribed(email, list_news):
+                # Only push newsletter=0 if PrestaShop says subscribed BUT Odoo says not in list
+                if email in presta_news_emails and email not in odoo_news_emails:
                     do_newsletter = 0
                     updated_unsub_news += 1
-                if _list_unsubscribed(email, list_offers):
+                if email in presta_offers_emails and email not in odoo_offers_emails:
                     do_optin = 0
                     updated_unsub_offers += 1
 
@@ -1381,7 +1299,7 @@ class PrestashopBackend(models.Model):
             "ok" if errors == 0 else "warning",
             (
                 f"Odoo->PrestaShop consents sync done. updated_customers={updated}; errors={errors}; "
-                f"opt_out_emails={updated_opt_out}; blacklisted_emails={updated_blacklist}; "
+                f"blacklisted_emails={updated_blacklist}; "
                 f"unsub_news_emails={updated_unsub_news}; unsub_offers_emails={updated_unsub_offers}"
             ),
         )
@@ -1431,10 +1349,6 @@ class PrestashopBackend(models.Model):
             "params": {"title": _("PrestaShop"), "message": msg, "sticky": False},
         }
 
-    # Backward compatibility: keep the old button method name
-    def action_sync_newsletter_to_email_marketing(self):
-        return self.action_sync_consents()
-
     def action_push_opt_outs_to_prestashop(self):
         """Sync consents from Odoo to PrestaShop (revocation-only).
 
@@ -1463,10 +1377,26 @@ class PrestashopBackend(models.Model):
         for backend in self:
             def run():
                 start = time.perf_counter()
-                backend._import_customers()
+                result = backend._import_customers()
                 dur = time.perf_counter() - start
+                stats = result if isinstance(result, dict) else {}
+                created = stats.get("created", 0)
+                updated = stats.get("updated", 0)
+                errors = stats.get("errors", 0)
+                retagged = stats.get("retagged", 0)
                 backend._log("import_customers", "ok", "Customer import finished.", duration_sec=dur)
-                return "Customer import finished."
+                parts = []
+                if created:
+                    parts.append(f"{created} created")
+                if updated:
+                    parts.append(f"{updated} updated")
+                if retagged:
+                    parts.append(f"{retagged} retagged")
+                if errors:
+                    parts.append(f"{errors} errors")
+                if not parts:
+                    return _("Customer import finished. No new customers.")
+                return _("Customer import finished: %s.") % ", ".join(parts)
             msg = backend._run_locked("import_customers", run)
         return {
             "type": "ir.actions.client",
@@ -1535,12 +1465,12 @@ class PrestashopBackend(models.Model):
                             break
                     backend.address_full_scan_next_run = fields.Datetime.now() + relativedelta(weeks=1)
                     backend._log(
-                        "cron_full_scan_addresses_weekly",
+                        "sync_addresses",
                         "ok",
                         f"Weekly address full scan run. batches={batches}, completed={bool(last_stats.get('completed'))}",
                     )
                     return True
-                backend._run_locked("cron_full_scan_addresses_weekly", run)
+                backend._run_locked("sync_addresses", run)
             except UserError:
                 # Another run is already in progress; skip silently.
                 continue
@@ -1710,7 +1640,7 @@ class PrestashopBackend(models.Model):
 
         vals = {
             "name": " - ".join([p for p in name_parts if p])[:255],
-            "type": "other",
+            "type": "delivery",
             "parent_id": parent_partner.id,
             "street": street or False,
             "street2": street2 or False,
@@ -2017,7 +1947,7 @@ class PrestashopBackend(models.Model):
 
         if (not self.include_guest_customers) and is_guest == "1":
             self._log(
-                "reimport_customer",
+                "import_customers",
                 "warning",
                 f"Customer {prestashop_id} is a guest; skipped (include_guest_customers=False).",
                 prestashop_id=prestashop_id,
@@ -2064,7 +1994,7 @@ class PrestashopBackend(models.Model):
             created = 1
 
         self._log(
-            "reimport_customer",
+            "import_customers",
             "ok",
             f"Customer reimported by ID. created={created}, updated={updated}",
             prestashop_id=prestashop_id,
@@ -2174,6 +2104,20 @@ class PrestashopBackend(models.Model):
         self.last_customer_sync = fields.Datetime.now()
         if max_seen_id > int(self.last_customer_presta_id or 0):
             self.last_customer_presta_id = max_seen_id
+
+        # Ensure ALL mapped customers have the tag (fixes missing tags after tag recreation,
+        # or customers imported before tag feature existed).
+        retagged = 0
+        if tag:
+            try:
+                all_maps = self.env["prestashop.customer.map"].sudo().search([("backend_id", "=", self.id)])
+                for m in all_maps:
+                    if m.partner_id and tag.id not in m.partner_id.category_id.ids:
+                        m.partner_id.sudo().write({"category_id": [(4, tag.id)]})
+                        retagged += 1
+            except Exception as e:
+                self._log("import_customers", "warning", "Failed to re-tag existing customers", details=str(e))
+
         # Push audiences into Email Marketing (2 lists: newsletter + partner offers)
         try:
             self._sync_email_marketing_lists(client=client, preview=False)
@@ -2184,9 +2128,15 @@ class PrestashopBackend(models.Model):
         self._log(
             "import_customers",
             "ok",
-            f"Customers synced. created={created}, updated={updated}, skipped={skipped}, errors={errors}",
+            f"Customers synced. created={created}, updated={updated}, skipped={skipped}, errors={errors}, retagged={retagged}",
         )
-        return True
+        return {
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "errors": errors,
+            "retagged": retagged,
+        }
 
 
     def _parse_paid_state_ids(self):
@@ -2290,11 +2240,13 @@ class PrestashopBackend(models.Model):
                         "price_unit": total_shipping_val,
                     }))
 
+                # Use Odoo's address_get to resolve delivery/invoice addresses from child contacts
+                addr = partner.address_get(["delivery", "invoice"])
                 sale_vals = {
                     "company_id": self.company_id.id,
                     "partner_id": partner.id,
-                    "partner_invoice_id": partner.id,
-                    "partner_shipping_id": partner.id,
+                    "partner_invoice_id": addr.get("invoice", partner.id),
+                    "partner_shipping_id": addr.get("delivery", partner.id),
                     "pricelist_id": pricelist.id if pricelist else False,
                     "warehouse_id": self.warehouse_id.id,
                     "team_id": self.team_id.id if self.team_id else False,
@@ -2336,12 +2288,16 @@ class PrestashopBackend(models.Model):
         )
 
     def _get_or_create_partner(self, client, id_customer, id_address_delivery, prestashop_order_id):
+        tag = self._ensure_customer_tag()
+
         customer_map = self.env["prestashop.customer.map"].search([
             ("backend_id", "=", self.id),
             ("prestashop_id", "=", id_customer),
         ], limit=1)
         if customer_map:
             partner = customer_map.partner_id
+            if tag and tag.id not in partner.category_id.ids:
+                partner.sudo().write({"category_id": [(4, tag.id)]})
         else:
             cust = client.get_customer(id_customer) if id_customer else None
             if cust is None:
@@ -2357,11 +2313,17 @@ class PrestashopBackend(models.Model):
 
             partner = self.env["res.partner"].search([("email", "=", email)], limit=1) if email else False
             if not partner:
-                partner = self.env["res.partner"].create({
+                vals = {
                     "name": name,
                     "email": email,
                     "company_id": self.company_id.id,
-                })
+                }
+                if tag:
+                    vals["category_id"] = [(6, 0, [tag.id])]
+                partner = self.env["res.partner"].create(vals)
+            else:
+                if tag and tag.id not in partner.category_id.ids:
+                    partner.sudo().write({"category_id": [(4, tag.id)]})
             self.env["prestashop.customer.map"].create({
                 "backend_id": self.id,
                 "prestashop_id": id_customer,

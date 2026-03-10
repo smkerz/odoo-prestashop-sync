@@ -4,7 +4,10 @@
         <field name="name">prestashop.sync.log.tree</field>
         <field name="model">prestashop.sync.log</field>
         <field name="arch" type="xml">
-            <tree string="PrestaShop Sync Logs">
+            <tree string="PrestaShop Sync Logs"
+                  decoration-danger="status == 'error'"
+                  decoration-warning="status == 'warning'"
+                  decoration-info="status == 'info'">
                 <field name="create_date"/>
                 <field name="backend_id"/>
                 <field name="operation"/>
@@ -16,6 +19,28 @@
         </field>
     </record>
 
+    <record id="view_prestashop_log_search" model="ir.ui.view">
+        <field name="name">prestashop.sync.log.search</field>
+        <field name="model">prestashop.sync.log</field>
+        <field name="arch" type="xml">
+            <search string="Search Logs">
+                <field name="message"/>
+                <field name="prestashop_id" string="PrestaShop ID"/>
+                <field name="details"/>
+                <separator/>
+                <filter name="errors" string="Errors" domain="[('status', '=', 'error')]"/>
+                <filter name="warnings" string="Warnings" domain="[('status', '=', 'warning')]"/>
+                <filter name="today" string="Today" domain="[('create_date', '&gt;=', (context_today()).strftime('%Y-%m-%d'))]"/>
+                <separator/>
+                <group expand="0" string="Group By">
+                    <filter name="group_operation" string="Operation" context="{'group_by': 'operation'}"/>
+                    <filter name="group_status" string="Status" context="{'group_by': 'status'}"/>
+                    <filter name="group_backend" string="Backend" context="{'group_by': 'backend_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
     <record id="view_prestashop_log_form" model="ir.ui.view">
         <field name="name">prestashop.sync.log.form</field>
         <field name="model">prestashop.sync.log</field>
@@ -23,12 +48,21 @@
             <form string="Sync Log">
                 <sheet>
                     <group>
-                        <field name="backend_id"/>
-                        <field name="operation"/>
-                        <field name="status"/>
-                        <field name="duration_sec"/>
-                        <field name="prestashop_id"/>
-                        <field name="message"/>
+                        <group>
+                            <field name="backend_id"/>
+                            <field name="operation"/>
+                            <field name="status"/>
+                        </group>
+                        <group>
+                            <field name="create_date"/>
+                            <field name="duration_sec"/>
+                            <field name="prestashop_id"/>
+                        </group>
+                    </group>
+                    <group string="Message">
+                        <field name="message" nolabel="1"/>
+                    </group>
+                    <group string="Details">
                         <field name="details" nolabel="1"/>
                     </group>
                 </sheet>
@@ -40,5 +74,6 @@
         <field name="name">Logs</field>
         <field name="res_model">prestashop.sync.log</field>
         <field name="view_mode">tree,form</field>
+        <field name="search_view_id" ref="view_prestashop_log_search"/>
     </record>
 </odoo>
