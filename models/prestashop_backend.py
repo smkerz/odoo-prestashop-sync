@@ -31,7 +31,7 @@ class PrestashopBackend(models.Model):
     )
     webhook_url = fields.Char(
         string="Webhook URL",
-        help="Public Odoo webhook endpoint URL (e.g. https://odoo.example.com/prestashop/webhook/consents)."
+        help="Public Odoo webhook base URL (e.g. https://odoo.example.com/prestashop/webhook). Endpoints /consents and /addresses are added automatically."
     )
     webhook_url_auto = fields.Char(
         string="Webhook URL (auto)",
@@ -129,8 +129,8 @@ class PrestashopBackend(models.Model):
                 rec.webhook_url_auto = False
                 continue
 
-            # Utilise l'URL telle quelle depuis web.base.url
-            webhook_url = f"{base_url.rstrip('/')}/prestashop/webhook/consents"
+            # Base webhook URL (without /consents or /addresses suffix)
+            webhook_url = f"{base_url.rstrip('/')}/prestashop/webhook"
             rec.webhook_url_auto = webhook_url
 
     paid_state_ids = fields.Char(
@@ -422,9 +422,17 @@ class PrestashopBackend(models.Model):
         # 4. Validate configuration matches
         issues = []
 
+        # Normalize URLs: strip trailing slashes and known endpoint suffixes
+        def _normalize_webhook_url(url):
+            url = url.rstrip('/')
+            for suffix in ('/consents', '/addresses'):
+                if url.endswith(suffix):
+                    url = url[:-len(suffix)]
+            return url.rstrip('/')
+
         if not presta_webhook_url:
             issues.append("❌ PrestaShop webhook URL is not configured")
-        elif presta_webhook_url != odoo_webhook_url:
+        elif _normalize_webhook_url(presta_webhook_url) != _normalize_webhook_url(odoo_webhook_url):
             issues.append(f"❌ Webhook URL mismatch:\n  • Odoo:       {odoo_webhook_url}\n  • PrestaShop: {presta_webhook_url}")
 
         if not presta_webhook_secret:
