@@ -168,6 +168,4 @@ class PrestashopWebhookController(http.Controller):
                 if bhost and bhost == host:
                     return backend
 
-        if len(candidates) == 1:
-            return candidates[0]
         return None
