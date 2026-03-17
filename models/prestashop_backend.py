@@ -612,7 +612,14 @@ class PrestashopBackend(models.Model):
         if self.site_tag_id:
             return self.site_tag_id
 
-        tag_name = f"PS: {self.name}"
+        # Use hostname from base_url (e.g. "PS: debug.mcdavidian.com")
+        host = self.base_url or self.name
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(host).netloc or host
+        except Exception:
+            pass
+        tag_name = f"PS: {host}"
         Cat = self.env["res.partner.category"].sudo()
         tag = Cat.search([("name", "=", tag_name)], limit=1)
         if not tag:
