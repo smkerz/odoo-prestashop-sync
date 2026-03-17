@@ -7,7 +7,7 @@ PrestaShop backends. This avoids waiting for the hourly cron.
 
 import logging
 
-from odoo import api, models
+from odoo import api, models, registry
 
 _logger = logging.getLogger(__name__)
 
@@ -36,27 +36,30 @@ class MailingContact(models.Model):
 
     def write(self, vals):
         res = super().write(vals)
-        # Trigger when opt_out is set on the contact itself (older Odoo versions)
+        # Trigger when opt_out is set on the contact itself
         if vals.get("opt_out"):
             _push_opt_outs_to_all_backends(self.env)
         # Trigger when a contact is removed from a list (list_ids with unlink command)
         if "list_ids" in vals:
             for cmd in vals["list_ids"]:
                 if isinstance(cmd, (list, tuple)) and cmd[0] in (2, 3):
-                    # 2 = delete, 3 = unlink
                     _push_opt_outs_to_all_backends(self.env)
                     break
         return res
 
 
-class MailingContactSubscription(models.Model):
-    _inherit = "mailing.contact.subscription"
+try:
+    # mailing.contact.subscription exists in Odoo 16+ with mass_mailing installed
+    class MailingContactSubscription(models.Model):
+        _inherit = "mailing.contact.subscription"
 
-    def write(self, vals):
-        res = super().write(vals)
-        if vals.get("opt_out"):
-            _push_opt_outs_to_all_backends(self.env)
-        return res
+        def write(self, vals):
+            res = super().write(vals)
+            if vals.get("opt_out"):
+                _push_opt_outs_to_all_backends(self.env)
+            return res
+except Exception:
+    _logger.debug("mailing.contact.subscription not available, skipping override")
 
 
 class MailBlacklist(models.Model):
