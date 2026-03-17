@@ -103,18 +103,17 @@ curl -X POST https://ton-odoo.com/prestashop/webhook/addresses \
 
 ---
 
-## Phase 5 — Consentements Odoo → PrestaShop (révocation)
+## Phase 5 — Consentements Odoo → PrestaShop (révocation temps réel)
 
 | #   | Ce que tu fais | Où | Ce que tu vérifies |
 |-----|----------------|----|--------------------|
 | 5.1 | Prends un client inscrit newsletter dans PS (`newsletter=1`), déjà synced en phase 4 | — | — |
 | 5.2 | Dans Odoo, ouvre la mailing list Newsletter, trouve ce contact, mets `opt_out = True` | Odoo Mailing List | Contact marqué **"opted out"** |
-| 5.3 | Clic **Odoo → Presta** | Odoo Backend | Log `sync_consents_odoo_to_prestashop` statut `ok` |
-| 5.4 | Va dans PS, ouvre ce client | PrestaShop | `newsletter = 0` (révoqué par Odoo) |
-| 5.5 | Dans PS, remets `newsletter = 1` manuellement | PrestaShop | — |
-| 5.6 | Relance **Odoo → Presta** | Odoo Backend | Rien ne change — Odoo ne repousse **PAS** `newsletter=1` (revocation-only) |
-| 5.7 | Dans Odoo, ajoute l'email à la Blacklist (Email Marketing > Blacklist) | Odoo | Email blacklisté |
-| 5.8 | Relance **Odoo → Presta** | Odoo Backend | Dans PS : `newsletter=0` **ET** `optin=0` (blacklist = révocation totale) |
+| 5.3 | Va dans PS, ouvre ce client **sans cliquer aucun bouton dans Odoo** | PrestaShop | `newsletter = 0` (révoqué automatiquement en temps réel) |
+| 5.4 | Dans PS, remets `newsletter = 1` manuellement | PrestaShop | — |
+| 5.5 | Relance **Presta → Odoo** puis vérifie PS | Odoo Backend | Rien ne change dans PS — Odoo ne repousse **PAS** `newsletter=1` (revocation-only) |
+| 5.6 | Dans Odoo, ajoute l'email à la Blacklist (Email Marketing > Blacklist) | Odoo | Email blacklisté |
+| 5.7 | Va dans PS, ouvre ce client **sans cliquer aucun bouton** | PrestaShop | `newsletter=0` **ET** `optin=0` (blacklist = révocation totale, poussée en temps réel) |
 
 ---
 
@@ -127,7 +126,7 @@ curl -X POST https://ton-odoo.com/prestashop/webhook/addresses \
 | 6.3 | Dans l'email reçu, clique **"Unsubscribe"** en bas | Email | Page de désinscription Odoo |
 | 6.4 | Confirme la désinscription | Navigateur | — |
 | 6.5 | Vérifie : mailing list > ce contact a `opt_out = True` | Odoo | Contact désinscrit de la liste |
-| 6.6 | Clic **Odoo → Presta** | Odoo Backend | `newsletter=0` dans PrestaShop pour ce client |
+| 6.6 | Va dans PS, ouvre ce client **sans cliquer aucun bouton** | PrestaShop | `newsletter=0` (poussé automatiquement en temps réel par le unsubscribe) |
 
 ---
 
