@@ -154,6 +154,11 @@ class PrestashopBackend(models.Model):
         string="Imported Customer Tag",
         help="Tag automatically applied to customers imported from PrestaShop."
     )
+    site_tag_id = fields.Many2one(
+        "res.partner.category",
+        string="Site Tag",
+        help="Tag identifying which PrestaShop site the customer comes from (e.g. 'PS: Mon Site FR'). Auto-created from the backend name."
+    )
     newsletter_tag_id = fields.Many2one(
         "res.partner.category",
         string="Newsletter Tag",
@@ -601,6 +606,21 @@ class PrestashopBackend(models.Model):
         self.customer_tag_id = tag.id
         return tag
 
+    def _ensure_site_tag(self):
+        """Ensure a per-site partner tag exists (e.g. 'PS: Mon Site FR')."""
+        self.ensure_one()
+        if self.site_tag_id:
+            return self.site_tag_id
+
+        tag_name = f"PS: {self.name}"
+        Cat = self.env["res.partner.category"].sudo()
+        tag = Cat.search([("name", "=", tag_name)], limit=1)
+        if not tag:
+            tag = Cat.create({"name": tag_name})
+
+        self.site_tag_id = tag.id
+        return tag
+
     @staticmethod
     def _norm_email(email: str) -> str:
         return (email or "").strip().lower()
@@ -883,6 +903,7 @@ class PrestashopBackend(models.Model):
         try:
             client = self._client()
             tag = self._ensure_customer_tag()
+            site_tag = self._ensure_site_tag()
 
             node = client.get_customer(str(prestashop_id))
             if node is None:
@@ -919,7 +940,7 @@ class PrestashopBackend(models.Model):
 
             if partner:
                 partner.sudo().write(vals)
-                partner.sudo().write({"category_id": [(4, tag.id)]})
+                partner.sudo().write({"category_id": [(4, tag.id), (4, site_tag.id)]})
                 if not map_rec:
                     self.env["prestashop.customer.map"].sudo().create({
                         "backend_id": self.id,
@@ -928,7 +949,7 @@ class PrestashopBackend(models.Model):
                     })
                 self._log("webhook_create_customer", "ok", f"Customer {prestashop_id} updated via webhook")
             else:
-                vals["category_id"] = [(6, 0, [tag.id])]
+                vals["category_id"] = [(6, 0, [tag.id, site_tag.id])]
                 partner = self.env["res.partner"].sudo().create(vals)
                 self.env["prestashop.customer.map"].sudo().create({
                     "backend_id": self.id,
@@ -1941,6 +1962,7 @@ class PrestashopBackend(models.Model):
 
         client = self._client()
         tag = self._ensure_customer_tag()
+        site_tag = self._ensure_site_tag()
 
         node = client.get_customer(str(prestashop_customer_id))
         if node is None:
@@ -1983,7 +2005,7 @@ class PrestashopBackend(models.Model):
 
         if partner:
             partner.sudo().write(vals)
-            partner.sudo().write({"category_id": [(4, tag.id)]})
+            partner.sudo().write({"category_id": [(4, tag.id), (4, site_tag.id)]})
             if not map_rec:
                 self.env["prestashop.customer.map"].sudo().create({
                     "backend_id": self.id,
@@ -1992,7 +2014,7 @@ class PrestashopBackend(models.Model):
                 })
             updated = 1
         else:
-            vals["category_id"] = [(6, 0, [tag.id])]
+            vals["category_id"] = [(6, 0, [tag.id, site_tag.id])]
             partner = self.env["res.partner"].sudo().create(vals)
             self.env["prestashop.customer.map"].sudo().create({
                 "backend_id": self.id,
@@ -2020,6 +2042,7 @@ class PrestashopBackend(models.Model):
         self.ensure_one()
         client = self._client()
         tag = self._ensure_customer_tag()
+        site_tag = self._ensure_site_tag()
 
         # Use id-based incremental import (most compatible with PrestaShop 1.7 Webservice).
         try:
@@ -2079,7 +2102,7 @@ class PrestashopBackend(models.Model):
 
                 if partner:
                     partner.sudo().write(vals)
-                    partner.sudo().write({"category_id": [(4, tag.id)]})
+                    partner.sudo().write({"category_id": [(4, tag.id), (4, site_tag.id)]})
 
                     if not map_rec:
                         self.env["prestashop.customer.map"].sudo().create({
@@ -2089,7 +2112,7 @@ class PrestashopBackend(models.Model):
                         })
                     updated += 1
                 else:
-                    vals["category_id"] = [(6, 0, [tag.id])]
+                    vals["category_id"] = [(6, 0, [tag.id, site_tag.id])]
                     partner = self.env["res.partner"].sudo().create(vals)
 
                     self.env["prestashop.customer.map"].sudo().create({

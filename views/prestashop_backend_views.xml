@@ -430,7 +430,8 @@
                                     <field name="last_customer_sync"/>
                                     <field name="customer_sync_window_days"/>
                                     <field name="customer_tag_id"/>
-                                    <field name="last_customer_presta_id" readonly="1"/>
+                                    <field name="site_tag_id"/>
+                                    <field name="last_customer_presta_id"/>
                                     <field name="customer_batch_size"/>
                                     <field name="customer_max_per_run"/>
                                 </group>
