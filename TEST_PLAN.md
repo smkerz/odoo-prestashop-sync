@@ -23,9 +23,9 @@ Phase 0 (config)
 | 0.1 | PrestaShop > Paramètres avancés > Webservice | Activer le Webservice, créer une clé API avec **GET** sur `customers`, `addresses`, `countries`, `states`, `languages` + **PUT** sur `customers` |
 | 0.2 | Odoo > Paramètres système | Vérifier que `web.base.url` pointe vers ton Odoo (ex : `https://odoo.mondomaine.com`) |
 | 0.3 | Odoo > Apps | Mettre à jour la liste des apps, chercher **"PrestaShop"**, installer |
-| 0.4 | Odoo > PrestaShop > Créer un Backend | Remplir : **Name**, **Base URL** du PS, **API Key**, **Webhook Secret** (invente un secret, ex : `test123secret`) |
+| 0.4 | Odoo > PrestaShop > Créer un Backend | Remplir : **Name**, **Base URL** du PS, **API Key**, **Webhook Secret** (ex : `test123secret`) |
 | 0.5 | Odoo > Backend PS | Cliquer **Test** → doit afficher **"Connexion réussie"** |
-| 0.6 | Odoo > Backend PS > onglet Customers | Vérifier que `customer_tag_id` se crée auto. Si `newsletter_tag_id` et `partner_offers_tag_id` sont vides, les créer manuellement |
+| 0.6 | Odoo > Backend PS > onglet Customers | Vérifier que `customer_tag_id` se crée auto. Si `newsletter_tag_id` et `partner_offers_tag_id` sont vides, les créer manuellement. **Cocher `include_guest_customers`** si tu veux aussi importer les comptes invités |
 
 ---
 
@@ -33,13 +33,14 @@ Phase 0 (config)
 
 | #   | Ce que tu fais | Où | Ce que tu vérifies |
 |-----|----------------|----|--------------------|
-| 1.1 | Clic **Import** (section Customers) | Odoo Backend | Notification de succès. Logs : opération `import_customers`, statut `ok` |
-| 1.2 | Va dans Contacts, filtre par tag **"Client Prestashop"** | Odoo Contacts | Tous les clients PS sont là avec nom, email, téléphone. **Pas d'adresse** sur le contact principal |
-| 1.3 | Ouvre un client, vérifie les champs | Odoo Contact | Nom = nom PS, Email = email PS, **pas** de rue/ville/zip sur la fiche principale |
+| 1.1 | Vérifie que **Include Guest Customers** est coché (onglet Customers du Backend), puis clic **Import** | Odoo Backend | Notification de succès. Logs : opération `import_customers`, statut `ok`. Les comptes invités PS sont aussi importés |
+| 1.2 | Va dans Contacts, filtre par tag **"Client Prestashop"** | Odoo Contacts | Tous les clients PS (y compris invités) sont là avec nom, email, téléphone. L'import n'a **pas ajouté** de rue/ville/zip — si une adresse existait déjà sur le contact, elle est inchangée |
+| 1.3 | Ouvre un client, vérifie les champs | Odoo Contact | Nom = nom PS, Email = email PS. Pas de rue/ville/zip ajouté par l'import |
 | 1.4 | Relance **Import** | Odoo Backend | Aucun nouveau client importé (incrémental). Log dit `0 new` ou similaire |
 | 1.5 | Crée un nouveau client dans PS (back-office PS > Clients > Ajouter) | PrestaShop | — |
 | 1.6 | Relance **Import** dans Odoo | Odoo Backend | Seul le nouveau client apparaît. Les anciens ne sont pas dupliqués |
-| 1.7 | Supprime le mapping d'un client (`menu technique > prestashop.customer.map`, supprime une ligne) puis relance **Import** | Odoo | Le client est retrouvé par email, nouveau mapping créé, **pas de doublon** |
+| 1.7 | Décoche **Include Guest Customers**, relance **Import** | Odoo Backend | Les comptes invités (`is_guest=1`) sont ignorés (skipped). Seuls les vrais comptes sont importés |
+| 1.8 | Recoche **Include Guest Customers** pour la suite des tests | Odoo Backend | — |
 
 ---
 

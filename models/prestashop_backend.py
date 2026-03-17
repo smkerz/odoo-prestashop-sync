@@ -1086,9 +1086,9 @@ class PrestashopBackend(models.Model):
         """
         self.ensure_one()
 
-        action = payload.get("action", "").strip().lower()
-        customer_id = payload.get("customer_id", "").strip()
-        address_id = payload.get("address_id", "").strip()
+        action = str(payload.get("action", "")).strip().lower()
+        customer_id = str(payload.get("customer_id", "")).strip()
+        address_id = str(payload.get("address_id", "")).strip()
 
         if not customer_id or not address_id:
             self._log("sync_addresses", "warning", "Webhook address: missing customer_id or address_id", details=str(payload))
@@ -1173,7 +1173,43 @@ class PrestashopBackend(models.Model):
                         self._log("sync_addresses", "ok", f"Webhook address recreated: address_id={address_id}")
                         return {"status": "ok", "message": "address recreated"}
                 else:
-                    # Create new address
+                    # No mapping yet — try to find an existing child address to update
+                    # instead of creating a duplicate.
+                    sig = self._address_signature(vals)
+                    existing_children = self.env["res.partner"].sudo().search([
+                        ("parent_id", "=", parent_partner.id),
+                        ("type", "=", "delivery"),
+                    ])
+                    matched_child = False
+                    for child in existing_children:
+                        child_vals = {
+                            "street": child.street,
+                            "street2": child.street2,
+                            "zip": child.zip,
+                            "city": child.city,
+                            "country_id": child.country_id.id if child.country_id else False,
+                            "state_id": child.state_id.id if child.state_id else False,
+                            "phone": child.phone,
+                            "mobile": child.mobile,
+                            "company": child.commercial_company_name or child.company_name or child.name,
+                        }
+                        if self._address_signature(child_vals) == sig:
+                            matched_child = child
+                            break
+
+                    if matched_child:
+                        # Found matching child — link and update
+                        matched_child.sudo().write(vals)
+                        self.env["prestashop.address.map"].sudo().create({
+                            "backend_id": self.id,
+                            "prestashop_id": address_id,
+                            "address_partner_id": matched_child.id,
+                            "parent_partner_id": parent_partner.id,
+                        })
+                        self._log("sync_addresses", "ok", f"Webhook address linked to existing child: address_id={address_id}")
+                        return {"status": "ok", "message": "address linked and updated"}
+
+                    # No match found — create new address
                     address_partner = self.env["res.partner"].sudo().create(vals)
                     self.env["prestashop.address.map"].sudo().create({
                         "backend_id": self.id,
