@@ -237,7 +237,7 @@
                                     <ul>
                                         <li><strong>Customer sync window days</strong> : fenêtre de sécurité lors des imports.</li>
                                         <li><strong>Batch size / max per run</strong> : limite la charge (pratique en prod).</li>
-                                        <li><strong>Include guest customers</strong> : inclut les invités (si ton PrestaShop en crée).</li>
+                                        <li><strong>Include guest customers</strong> (coché par défaut) : inclut les comptes invités. Décocher pour n'importer que les vrais comptes clients.</li>
                                         <li><strong>Respect Odoo opt-out</strong> : empêche toute réinscription si Odoo a désinscrit/blacklisté.</li>
                                         <li><strong>Address limits</strong> : bornes pour éviter un gros run d'adresses.</li>
                                         <li><strong>Verify TLS</strong> : active la vérification SSL pour les appels vers PrestaShop.</li>
@@ -251,6 +251,11 @@
                                     <p>
                                         <strong>Principe :</strong> Odoo est la référence pour l'envoi (désinscriptions/blacklist). PrestaShop reste cohérent via un
                                         retour des révocations. Le connecteur ne pousse <strong>jamais</strong> de 0→1 côté PrestaShop.
+                                    </p>
+                                    <p>
+                                        <strong>Temps réel :</strong> les désinscriptions (opt-out) et les ajouts en blacklist dans Odoo sont
+                                        <strong>poussés immédiatement</strong> vers PrestaShop, sans attendre le cron.
+                                        Le cron « Odoo → Presta » sert de filet de rattrapage.
                                     </p>
                                     <table class="table table-sm table-bordered">
                                         <thead>
@@ -347,7 +352,9 @@
                                     </ul>
                                     <p><strong>Côté Odoo :</strong></p>
                                     <ul>
-                                        <li>Configurer <strong>web.base.url</strong> dans les paramètres système (pour générer l'URL webhook).</li>
+                                        <li>Configurer <strong>web.base.url</strong> dans les paramètres système (pour générer l'URL webhook).
+                                            <strong>IMPORTANT : ne pas mettre de slash final</strong> (ex : <code>https://odoo.mondomaine.com</code> et non <code>https://odoo.mondomaine.com/</code>).
+                                            Un trailing slash casse les liens de désinscription Email Marketing (double slash dans l'URL).</li>
                                         <li>Le Webhook Secret doit être <strong>identique</strong> dans Odoo et dans le module PrestaShop.</li>
                                     </ul>
                                 </div>
@@ -378,7 +385,7 @@
                                             <tr>
                                                 <td>Consents Odoo → Presta</td>
                                                 <td>1 heure</td>
-                                                <td>Pousse les désinscriptions Odoo vers PrestaShop (révocation uniquement, ne réabonne jamais)</td>
+                                                <td>Filet de rattrapage : les opt-outs sont poussés en temps réel, ce cron rattrape les cas manqués (révocation uniquement, ne réabonne jamais)</td>
                                             </tr>
                                             <tr>
                                                 <td>Full Scan Addresses</td>

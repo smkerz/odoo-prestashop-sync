@@ -119,14 +119,18 @@ curl -X POST https://ton-odoo.com/prestashop/webhook/addresses \
 
 ## Phase 6 — Désabonnement via lien email (scénario réel)
 
+> **Prérequis** : vérifier que `web.base.url` n'a **pas de slash final** (`https://odoo.mondomaine.com` et non `https://odoo.mondomaine.com/`).
+> Un trailing slash casse les liens de désinscription (double slash → le lien ne fonctionne pas).
+
 | #   | Ce que tu fais | Où | Ce que tu vérifies |
 |-----|----------------|----|--------------------|
 | 6.1 | Crée un Mailing dans Odoo envoyé à la liste Newsletter | Odoo Email Marketing | — |
 | 6.2 | Envoie le mailing (ou envoie un test à toi-même) | Odoo | — |
-| 6.3 | Dans l'email reçu, clique **"Unsubscribe"** en bas | Email | Page de désinscription Odoo |
+| 6.3 | Dans l'email reçu, clique **"Unsubscribe"** en bas | Email | Page de désinscription **publique** (sans login) |
 | 6.4 | Confirme la désinscription | Navigateur | — |
 | 6.5 | Vérifie : mailing list > ce contact a `opt_out = True` | Odoo | Contact désinscrit de la liste |
-| 6.6 | Va dans PS, ouvre ce client **sans cliquer aucun bouton** | PrestaShop | `newsletter=0` (poussé automatiquement en temps réel par le unsubscribe) |
+| 6.6 | Clic **Odoo → Presta** ou attends le cron (1h) | Odoo Backend | Log `sync_consents_odoo_to_prestashop` statut `ok` |
+| 6.7 | Va dans PS, ouvre ce client | PrestaShop | `newsletter=0` |
 
 ---
 
@@ -165,3 +169,22 @@ curl -X POST https://ton-odoo.com/prestashop/webhook/consents \
 | 8.5 | **Réimport ID** avec un ID PS valide | Client mis à jour/recréé |
 | 8.6 | **Réimport ID** avec un ID inexistant | Message d'erreur propre |
 | 8.7 | Toggle `respect_odoo_opt_out = OFF`, client blacklisté, relance **Presta → Odoo** avec `newsletter=1` dans PS | Le client **EST** réinscrit (opt-out ignoré). **Remettre ON après !** |
+
+---
+
+## Phase 9 — Multi-backend
+
+> Crée un **2e backend** PS dans Odoo (même PS ou un PS différent) avec sa propre clé API et son propre webhook secret.
+
+| #   | Ce que tu fais | Ce que tu vérifies |
+|-----|----------------|--------------------|
+| 9.1 | Crée un 2e Backend PS avec une URL et clé API différentes | Backend créé, **Test** = connexion réussie |
+| 9.2 | **Import** sur le backend 2 | Clients importés avec leur propre tag site. Pas de mélange avec le backend 1 |
+| 9.3 | Vérifie qu'un même email présent dans les 2 PS | Le contact Odoo a **les 2 tags** site, un seul `res.partner` (pas de doublon) |
+| 9.4 | **Adresses** sur le backend 2 | Les adresses sont liées au bon backend. Pas de mélange avec les adresses du backend 1 |
+| 9.5 | Webhook adresse avec `backend_id` du backend 2 et secret du backend 2 | Adresse créée/mise à jour sur le bon backend |
+| 9.6 | Webhook adresse avec `backend_id` du backend 2 mais **secret du backend 1** | `401` — la signature ne correspond pas |
+| 9.7 | **Presta → Odoo** (consents) sur le backend 2 | Mailing lists séparées : **"Newsletter (hostname2)"** et **"Partner Offers (hostname2)"** |
+| 9.8 | Opt-out un contact dans la liste Newsletter du backend 1 | Seul le backend 1 pousse `newsletter=0`. Le backend 2 n'est **pas affecté** (le contact reste inscrit à "Newsletter (hostname2)") |
+| 9.9 | **Purge Logs** sur le backend 1 | Seuls les logs du backend 1 sont supprimés. Les logs du backend 2 restent |
+| 9.10 | **Blackliste** l'email d'un contact présent dans les 2 backends (Email Marketing > Blacklist) | `newsletter=0` **ET** `optin=0` dans **les 2** PrestaShop (blacklist = révocation globale, tous backends) |

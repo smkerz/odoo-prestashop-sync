@@ -203,7 +203,7 @@ class PrestashopBackend(models.Model):
     )
 
     include_guest_customers = fields.Boolean(
-        default=False,
+        default=True,
         help="If enabled, guest checkout customers are also imported."
     )
 
