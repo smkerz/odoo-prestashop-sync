@@ -47,6 +47,12 @@ class MailingContact(models.Model):
     _inherit = "mailing.contact"
 
     def write(self, vals):
+        _logger.info("PRESTASHOP DEBUG mailing.contact.write keys=%s", list(vals.keys()))
+        for field in ("subscription_ids", "subscription_list_ids", "list_ids"):
+            if field in vals:
+                _logger.info("PRESTASHOP DEBUG %s = %s", field, vals[field])
+        if vals.get("opt_out"):
+            _logger.info("PRESTASHOP DEBUG opt_out=True detected")
         res = super().write(vals)
         should_push = False
         # opt_out set directly on the contact
@@ -55,10 +61,14 @@ class MailingContact(models.Model):
         # Check all possible subscription field names
         for field in ("subscription_ids", "subscription_list_ids", "list_ids"):
             if field in vals and _has_opt_out_in_commands(vals[field]):
+                _logger.info("PRESTASHOP DEBUG opt_out found in %s", field)
                 should_push = True
                 break
         if should_push:
+            _logger.info("PRESTASHOP DEBUG pushing opt-outs to all backends")
             _push_opt_outs_to_all_backends(self.env)
+        else:
+            _logger.info("PRESTASHOP DEBUG no opt_out detected, skipping push")
         return res
 
 
