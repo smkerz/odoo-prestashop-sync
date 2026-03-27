@@ -957,7 +957,7 @@ class PrestashopBackend(models.Model):
                 self._log("webhook_create_customer", "ok", f"Customer {prestashop_id} updated via webhook")
             else:
                 vals["category_id"] = [(6, 0, [tag.id, site_tag.id])]
-                partner = self.env["res.partner"].sudo().create(vals)
+                partner = self.env["res.partner"].sudo().with_context(tracking_disable=True).create(vals)
                 self.env["prestashop.customer.map"].sudo().create({
                     "backend_id": self.id,
                     "prestashop_id": prestashop_id,
@@ -986,7 +986,7 @@ class PrestashopBackend(models.Model):
         newsletter = 1 if to_bool(payload.get("newsletter")) else 0
         optin = 1 if to_bool(payload.get("optin")) else 0
 
-        Partner = self.env["res.partner"].sudo()
+        Partner = self.env["res.partner"].sudo().with_context(tracking_disable=True)
         partner = Partner.search([("email", "=ilike", email)], limit=1)
         if not partner:
             # Try to create the customer automatically if customer_id is provided
@@ -1163,12 +1163,12 @@ class PrestashopBackend(models.Model):
                     # Update existing address
                     address_partner = address_map.address_partner_id
                     if address_partner:
-                        address_partner.sudo().write(vals)
+                        address_partner.sudo().with_context(tracking_disable=True).write(vals)
                         self._log("sync_addresses", "ok", f"Webhook address updated: address_id={address_id}")
                         return {"status": "ok", "message": "address updated"}
                     else:
                         # Mapping exists but partner was deleted - recreate
-                        address_partner = self.env["res.partner"].sudo().create(vals)
+                        address_partner = self.env["res.partner"].sudo().with_context(tracking_disable=True).create(vals)
                         address_map.sudo().write({"address_partner_id": address_partner.id})
                         self._log("sync_addresses", "ok", f"Webhook address recreated: address_id={address_id}")
                         return {"status": "ok", "message": "address recreated"}
@@ -1199,7 +1199,7 @@ class PrestashopBackend(models.Model):
 
                     if matched_child:
                         # Found matching child — link and update
-                        matched_child.sudo().write(vals)
+                        matched_child.sudo().with_context(tracking_disable=True).write(vals)
                         self.env["prestashop.address.map"].sudo().create({
                             "backend_id": self.id,
                             "prestashop_id": address_id,
@@ -1210,7 +1210,7 @@ class PrestashopBackend(models.Model):
                         return {"status": "ok", "message": "address linked and updated"}
 
                     # No match found — create new address
-                    address_partner = self.env["res.partner"].sudo().create(vals)
+                    address_partner = self.env["res.partner"].sudo().with_context(tracking_disable=True).create(vals)
                     self.env["prestashop.address.map"].sudo().create({
                         "backend_id": self.id,
                         "prestashop_id": address_id,
@@ -1774,7 +1774,7 @@ class PrestashopBackend(models.Model):
             }
 
         AddressMap = self.env["prestashop.address.map"].sudo()
-        Partner = self.env["res.partner"].sudo()
+        Partner = self.env["res.partner"].sudo().with_context(tracking_disable=True)
         chunk_size = int(self.address_customer_chunk_size or 0) or 50
 
         created = 0
@@ -2058,7 +2058,7 @@ class PrestashopBackend(models.Model):
             updated = 1
         else:
             vals["category_id"] = [(6, 0, [tag.id, site_tag.id])]
-            partner = self.env["res.partner"].sudo().create(vals)
+            partner = self.env["res.partner"].sudo().with_context(tracking_disable=True).create(vals)
             self.env["prestashop.customer.map"].sudo().create({
                 "backend_id": self.id,
                 "prestashop_id": prestashop_id,
@@ -2156,7 +2156,7 @@ class PrestashopBackend(models.Model):
                     updated += 1
                 else:
                     vals["category_id"] = [(6, 0, [tag.id, site_tag.id])]
-                    partner = self.env["res.partner"].sudo().create(vals)
+                    partner = self.env["res.partner"].sudo().with_context(tracking_disable=True).create(vals)
 
                     self.env["prestashop.customer.map"].sudo().create({
                         "backend_id": self.id,

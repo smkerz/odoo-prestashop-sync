@@ -16,7 +16,13 @@
       "WebFetch(domain:forums.alliedmods.net)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(powershell -command \"\\(Get-ChildItem -Path ''D:\\\\Photo\\\\Website-Watcher-New'' -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum\\).Sum / 1GB\")",
-      "Bash(du -sh \"/d/Photo/Website-Watcher-New\" \"/d/Photo/Website-Watcher-Archives\" \"/d/Photo \\(Archives\\)/Website-Watcher Doublon\")"
+      "Bash(du -sh \"/d/Photo/Website-Watcher-New\" \"/d/Photo/Website-Watcher-Archives\" \"/d/Photo \\(Archives\\)/Website-Watcher Doublon\")",
+      "WebFetch(domain:mcdavidian.fr)",
+      "WebFetch(domain:mcdavidian.hair)",
+      "WebFetch(domain:mcdavidian.com)",
+      "Bash(cp preview.html preview-rose-fonce.html)",
+      "Bash(cp preview.html preview-rose-nude.html)",
+      "Bash(cp preview.html preview-rose-ancien.html)"
     ]
   }
 }
