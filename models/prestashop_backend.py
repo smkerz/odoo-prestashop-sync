@@ -946,8 +946,8 @@ class PrestashopBackend(models.Model):
             }
 
             if partner:
-                partner.sudo().write(vals)
-                partner.sudo().write({"category_id": [(4, tag.id), (4, site_tag.id)]})
+                partner.sudo().with_context(tracking_disable=True).write(vals)
+                partner.sudo().with_context(tracking_disable=True).write({"category_id": [(4, tag.id), (4, site_tag.id)]})
                 if not map_rec:
                     self.env["prestashop.customer.map"].sudo().create({
                         "backend_id": self.id,
@@ -1853,9 +1853,9 @@ class PrestashopBackend(models.Model):
                 sig = self._address_signature(vals)
 
                 if existing and existing.address_partner_id:
-                    existing.address_partner_id.sudo().write(vals)
+                    existing.address_partner_id.sudo().with_context(tracking_disable=True).write(vals)
                     if existing.parent_partner_id != cm.partner_id:
-                        existing.sudo().write({"parent_partner_id": cm.partner_id.id})
+                        existing.sudo().with_context(tracking_disable=True).write({"parent_partner_id": cm.partner_id.id})
                     updated += 1
                     processed_addresses += 1
                     return
@@ -2049,8 +2049,8 @@ class PrestashopBackend(models.Model):
         updated = 0
 
         if partner:
-            partner.sudo().write(vals)
-            partner.sudo().write({"category_id": [(4, tag.id), (4, site_tag.id)]})
+            partner.sudo().with_context(tracking_disable=True).write(vals)
+            partner.sudo().with_context(tracking_disable=True).write({"category_id": [(4, tag.id), (4, site_tag.id)]})
             if not map_rec:
                 self.env["prestashop.customer.map"].sudo().create({
                     "backend_id": self.id,
@@ -2147,8 +2147,8 @@ class PrestashopBackend(models.Model):
                 }
 
                 if partner:
-                    partner.sudo().write(vals)
-                    partner.sudo().write({"category_id": [(4, tag.id), (4, site_tag.id)]})
+                    partner.sudo().with_context(tracking_disable=True).write(vals)
+                    partner.sudo().with_context(tracking_disable=True).write({"category_id": [(4, tag.id), (4, site_tag.id)]})
 
                     if not map_rec:
                         self.env["prestashop.customer.map"].sudo().create({
