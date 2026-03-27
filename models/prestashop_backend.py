@@ -1084,6 +1084,7 @@ class PrestashopBackend(models.Model):
         - update: Fetch address from PrestaShop and update child partner in Odoo
         - delete: Delete child partner from Odoo via address mapping
         """
+        self = self.with_context(tracking_disable=True)
         self.ensure_one()
 
         action = str(payload.get("action", "")).strip().lower()
@@ -1744,6 +1745,7 @@ class PrestashopBackend(models.Model):
 
         Returns a dict with statistics, including whether the full scan is completed.
         """
+        self = self.with_context(tracking_disable=True)
         self.ensure_one()
         client = self._client()
 
@@ -2082,6 +2084,7 @@ class PrestashopBackend(models.Model):
         return _(f"Customer {prestashop_id} reimported. created={created}, updated={updated}.")
 
     def _import_customers(self):
+        self = self.with_context(tracking_disable=True)
         self.ensure_one()
         client = self._client()
         tag = self._ensure_customer_tag()
