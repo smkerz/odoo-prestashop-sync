@@ -936,7 +936,9 @@ class PrestashopBackend(models.Model):
 
             partner = map_rec.partner_id if map_rec else False
             if (not partner) and email:
-                partner = self.env["res.partner"].sudo().search([("email", "=", email)], limit=1)
+                partner = self.env["res.partner"].sudo().with_context(active_test=False).search([("email", "=", email)], limit=1)
+                if partner and not partner.active:
+                    partner.sudo().with_context(tracking_disable=True).write({"active": True})
 
             vals = {
                 "name": (" ".join([firstname, lastname])).strip() or email or f"PrestaShop Customer {prestashop_id}",
@@ -986,8 +988,10 @@ class PrestashopBackend(models.Model):
         newsletter = 1 if to_bool(payload.get("newsletter")) else 0
         optin = 1 if to_bool(payload.get("optin")) else 0
 
-        Partner = self.env["res.partner"].sudo().with_context(tracking_disable=True)
+        Partner = self.env["res.partner"].sudo().with_context(tracking_disable=True, active_test=False)
         partner = Partner.search([("email", "=ilike", email)], limit=1)
+        if partner and not partner.active:
+            partner.write({"active": True})
         if not partner:
             # Try to create the customer automatically if customer_id is provided
             customer_id = payload.get("customer_id", "").strip()
@@ -2036,7 +2040,9 @@ class PrestashopBackend(models.Model):
 
         partner = map_rec.partner_id if map_rec else False
         if (not partner) and email:
-            partner = self.env["res.partner"].sudo().search([("email", "=", email)], limit=1)
+            partner = self.env["res.partner"].sudo().with_context(active_test=False).search([("email", "=", email)], limit=1)
+            if partner and not partner.active:
+                partner.sudo().with_context(tracking_disable=True).write({"active": True})
 
         vals = {
             "name": (" ".join([firstname, lastname])).strip() or email or f"PrestaShop Customer {prestashop_id}",
@@ -2136,8 +2142,10 @@ class PrestashopBackend(models.Model):
 
                 partner = map_rec.partner_id if map_rec else False
                 if (not partner) and email:
-                    # Fallback: match by email
-                    partner = self.env["res.partner"].sudo().search([("email", "=", email)], limit=1)
+                    # Fallback: match by email (include archived contacts)
+                    partner = self.env["res.partner"].sudo().with_context(active_test=False).search([("email", "=", email)], limit=1)
+                    if partner and not partner.active:
+                        partner.sudo().with_context(tracking_disable=True).write({"active": True})
 
                 vals = {
                     "name": (" ".join([firstname, lastname])).strip() or email or f"PrestaShop Customer {prestashop_id}",
