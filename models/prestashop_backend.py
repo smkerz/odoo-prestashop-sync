@@ -795,9 +795,31 @@ class PrestashopBackend(models.Model):
                 if mc:
                     mc_by_email[email] = mc
             if not mc and not preview:
-                mc = MailingContact.create({"name": partner.name or email, "email": email})
+                name = (partner.name if partner else None) or email
+                mc = MailingContact.create({"name": name, "email": email})
                 mc_by_email[email] = mc
             return mc
+
+        # ── Email-only subscribers (ps_emailsubscription) ──────────────
+        # These are visitors who subscribed via the newsletter footer block
+        # without creating a customer account.
+        desired_news_emails = set()  # emails (not partner IDs) for email-only subs
+        try:
+            email_only_subs = client.list_email_only_subscribers()
+            for sub in email_only_subs:
+                sub_email = self._norm_email(sub.get("email"))
+                if sub_email and sub_email not in p_by_email:
+                    p_by_email[sub_email] = None  # No partner for these
+                    desired_news_emails.add(sub_email)
+            if email_only_subs:
+                self._log("sync_email_marketing", "ok",
+                          f"Found {len(email_only_subs)} email-only subscribers from ps_emailsubscription")
+        except Exception as e:
+            self._log("sync_email_marketing", "warning",
+                      "Failed to fetch email-only subscribers", details=str(e))
+        # Update emails list after adding email-only subscribers
+        emails = list(p_by_email.keys())
+        # ──────────────────────────────────────────────────────────────
 
         blacklisted_emails = self._blacklisted_emails(emails)
         sub_field_name = self._discover_subscription_field(MailingContact)
@@ -818,15 +840,16 @@ class PrestashopBackend(models.Model):
                 return True
             return False
 
-        def sync_one_list(list_rec, desired_partner_ids: set):
+        def sync_one_list(list_rec, desired_partner_ids: set, desired_emails: set = None):
             subscribe_actions = 0
             unsubscribe_actions = 0
             skipped = 0
             opt_out_skipped = 0
             list_opt_out_skipped = 0
+            desired_emails = desired_emails or set()
 
             for email, partner in p_by_email.items():
-                want = partner.id in desired_partner_ids
+                want = (partner is not None and partner.id in desired_partner_ids) or (email in desired_emails)
                 mc = mc_by_email.get(email)
 
                 if want:
@@ -891,7 +914,7 @@ class PrestashopBackend(models.Model):
             }
 
         return {
-            "newsletter": sync_one_list(list_news, desired_news),
+            "newsletter": sync_one_list(list_news, desired_news, desired_news_emails),
             "offers": sync_one_list(list_offers, desired_offers),
         }
 
@@ -988,6 +1011,8 @@ class PrestashopBackend(models.Model):
         newsletter = 1 if to_bool(payload.get("newsletter")) else 0
         optin = 1 if to_bool(payload.get("optin")) else 0
 
+        email_only = payload.get("email_only", False)
+
         Partner = self.env["res.partner"].sudo().with_context(tracking_disable=True, active_test=False)
         partner = Partner.search([("email", "=ilike", email)], limit=1)
         if partner and not partner.active:
@@ -1002,25 +1027,26 @@ class PrestashopBackend(models.Model):
                 except Exception as e:
                     self._log("sync_consents", "error", f"Webhook: failed to create customer {customer_id}", details=str(e))
 
-            if not partner:
+            if not partner and not email_only:
                 self._log("sync_consents", "warning", "Webhook: partner not found and could not be created", details=email)
                 return {"status": "skipped", "message": "partner not found"}
 
-        def update_tag(tag, enabled):
-            if not tag:
-                return
-            if enabled:
-                partner.write({"category_id": [(4, tag.id)]})
-            else:
-                partner.write({"category_id": [(3, tag.id)]})
+        if partner:
+            def update_tag(tag, enabled):
+                if not tag:
+                    return
+                if enabled:
+                    partner.write({"category_id": [(4, tag.id)]})
+                else:
+                    partner.write({"category_id": [(3, tag.id)]})
 
-        update_tag(self.newsletter_tag_id, bool(newsletter))
-        update_tag(self.partner_offers_tag_id, bool(optin))
+            update_tag(self.newsletter_tag_id, bool(newsletter))
+            update_tag(self.partner_offers_tag_id, bool(optin))
 
-        if newsletter and self.newsletter_revoked_tag_id:
-            partner.write({"category_id": [(3, self.newsletter_revoked_tag_id.id)]})
-        if optin and self.partner_offers_revoked_tag_id:
-            partner.write({"category_id": [(3, self.partner_offers_revoked_tag_id.id)]})
+            if newsletter and self.newsletter_revoked_tag_id:
+                partner.write({"category_id": [(3, self.newsletter_revoked_tag_id.id)]})
+            if optin and self.partner_offers_revoked_tag_id:
+                partner.write({"category_id": [(3, self.partner_offers_revoked_tag_id.id)]})
 
         try:
             MailingContact = self.env["mailing.contact"].sudo()
@@ -1035,7 +1061,8 @@ class PrestashopBackend(models.Model):
 
         mc = MailingContact.search([("email", "=ilike", email)], limit=1)
         if not mc:
-            mc = MailingContact.create({"name": partner.name or email, "email": email})
+            name = (partner.name if partner else None) or email
+            mc = MailingContact.create({"name": name, "email": email})
 
         globally_blocked = bool(self._blacklisted_emails([email]))
         if self.respect_odoo_opt_out and ("opt_out" in mc._fields) and bool(mc.opt_out):

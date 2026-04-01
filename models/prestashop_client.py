@@ -343,6 +343,38 @@ class PrestaShopClient:
             return ids
 
 
+    def list_email_only_subscribers(self):
+        """Return list of email-only newsletter subscribers from ps_emailsubscription.
+
+        These are visitors who subscribed via the newsletter block without creating
+        a customer account. Requires the prestashopodoo webhook module with the
+        emailsubscribers endpoint installed.
+
+        Returns a list of dicts: [{"email": "...", "active": "1"}, ...]
+        """
+        # Build the front controller URL (not the webservice API)
+        # URL: /module/prestashopodoo/emailsubscribers?ws_key=API_KEY&active_only=1
+        base = self.base_url.rstrip("/")
+        url = f"{base}/module/prestashopodoo/emailsubscribers"
+        params = {
+            "ws_key": self.api_key,
+            "active_only": "1",
+        }
+        try:
+            resp = requests.get(url, params=params, timeout=self.timeout, verify=self.verify_tls)
+            if resp.status_code == 404:
+                _logger.info("Email subscribers endpoint not available (module not installed?)")
+                return []
+            if resp.status_code >= 300:
+                _logger.warning("Email subscribers endpoint returned %s: %s", resp.status_code, resp.text[:200])
+                return []
+            data = resp.json()
+            return data.get("subscribers", [])
+        except Exception as e:
+            _logger.warning("Failed to fetch email-only subscribers: %s", e)
+            return []
+
+
     @staticmethod
     def _extract_list(root, container_tag: str, item_tag: str):
         items = []
