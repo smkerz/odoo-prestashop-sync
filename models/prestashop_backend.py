@@ -848,6 +848,12 @@ class PrestashopBackend(models.Model):
             list_opt_out_skipped = 0
             desired_emails = desired_emails or set()
 
+            # Build the full set of desired emails for this list
+            all_desired_emails = set(desired_emails)
+            for email, partner in p_by_email.items():
+                if partner is not None and partner.id in desired_partner_ids:
+                    all_desired_emails.add(email)
+
             for email, partner in p_by_email.items():
                 want = (partner is not None and partner.id in desired_partner_ids) or (email in desired_emails)
                 mc = mc_by_email.get(email)
@@ -904,6 +910,37 @@ class PrestashopBackend(models.Model):
                         if not preview:
                             mc.write({"list_ids": [(3, list_rec.id)]})
                         unsubscribe_actions += 1
+
+            # ── Catch orphaned contacts ──────────────────────────────────
+            # Contacts in this Odoo list that are NOT in PrestaShop at all
+            # (e.g. deleted from ps_emailsubscription or removed from PS).
+            # These were missed by the loop above because they aren't in p_by_email.
+            all_list_contacts = MailingContact.search([("list_ids", "in", list_rec.id)])
+            for mc in all_list_contacts:
+                mc_email = self._norm_email(mc.email)
+                if not mc_email:
+                    continue
+                # Already processed in the loop above
+                if mc_email in p_by_email:
+                    continue
+                # This contact is in Odoo's list but not in PrestaShop -> unsubscribe
+                if mc_email not in all_desired_emails:
+                    sub = None
+                    if sub_field_name:
+                        for s in getattr(mc, sub_field_name, []):
+                            if s.list_id.id == list_rec.id:
+                                sub = s
+                                break
+                    if sub and hasattr(sub, "opt_out"):
+                        if not sub.opt_out:
+                            if not preview:
+                                sub.write({"opt_out": True})
+                            unsubscribe_actions += 1
+                    elif list_rec in mc.list_ids:
+                        if not preview:
+                            mc.write({"list_ids": [(3, list_rec.id)]})
+                        unsubscribe_actions += 1
+            # ──────────────────────────────────────────────────────────────
 
             return {
                 "subscribe": subscribe_actions,
