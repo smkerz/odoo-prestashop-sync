@@ -742,11 +742,8 @@ class PrestashopBackend(models.Model):
         # PrestaShop IDs -> partner IDs
         presta_to_partner = {str(m.prestashop_id): m.partner_id.id for m in maps if m.prestashop_id and m.partner_id}
 
-        # Desired subscription sets (partner_id)
-        # IMPORTANT: news_ok / offers_ok track whether the PrestaShop API call
-        # succeeded. If it failed (e.g. Cloudflare 403, network error), we MUST
-        # NOT proceed with the unsubscribe pass — an empty desired set would
-        # opt-out every mapped contact in the list.
+        # news_ok / offers_ok guard against mass unsubscribe when the PS API
+        # fetch fails: an empty desired set would opt-out every mapped contact.
         desired_news = set()
         desired_offers = set()
         news_ok = False
@@ -865,10 +862,7 @@ class PrestashopBackend(models.Model):
                 if want:
                     mc = get_or_create_mc(email, partner)
                     if not mc:
-                        # In preview mode, get_or_create_mc returns None when the
-                        # mailing.contact does not exist yet (preview never writes).
-                        # The real sync would create it and subscribe it — count it
-                        # as a would-be subscribe so the preview reflects reality.
+                        # Preview never creates mc; classify as the real sync would.
                         if preview:
                             if email in blacklisted_emails:
                                 opt_out_skipped += 1
@@ -1039,10 +1033,9 @@ class PrestashopBackend(models.Model):
 
         Partner = self.env["res.partner"].sudo().with_context(tracking_disable=True, active_test=False)
         partner = None
+        renamed_mc = None  # mailing.contact already relocated from old_email to new email
 
-        # Prefer map lookup for registered customers — handles email changes on
-        # PrestaShop side. Without this, renaming an email in PrestaShop would
-        # orphan the Odoo partner (still referenced by the old email).
+        # Prefer map lookup so a PS-side email change doesn't orphan the partner.
         if customer_id and customer_id != "0":
             map_rec = self.env["prestashop.customer.map"].sudo().search([
                 ("backend_id", "=", self.id),
@@ -1054,25 +1047,23 @@ class PrestashopBackend(models.Model):
                     partner.write({"active": True})
                 old_email = (partner.email or "").strip().lower()
                 if old_email and old_email != email:
-                    partner.sudo().with_context(tracking_disable=True).write({"email": raw_email})
-                    old_mc = self.env["mailing.contact"].sudo().search(
-                        [("email", "=ilike", old_email)], limit=1,
+                    partner.write({"email": raw_email})
+                    renamed_mc = self.env["mailing.contact"].sudo().search(
+                        [("email", "=", old_email)], limit=1,
                     )
-                    if old_mc:
-                        old_mc.sudo().write({"email": raw_email})
+                    if renamed_mc:
+                        renamed_mc.write({"email": raw_email})
                     self._log(
                         "sync_consents", "info",
                         f"Partner email updated from PrestaShop: {old_email} -> {email}",
                         details=f"presta_id={customer_id}",
                     )
 
-        # Fallback: email lookup (for email-only subs or unmapped partners)
         if not partner:
             partner = Partner.search([("email", "=ilike", email)], limit=1)
             if partner and not partner.active:
                 partner.write({"active": True})
 
-        # Still not found: try to create via customer_id
         if not partner and customer_id and customer_id != "0":
             try:
                 partner = self._fetch_and_create_customer_from_webhook(customer_id)
@@ -1111,7 +1102,7 @@ class PrestashopBackend(models.Model):
         list_news = self._ensure_mailing_list("newsletter")
         list_offers = self._ensure_mailing_list("offers")
 
-        mc = MailingContact.search([("email", "=ilike", email)], limit=1)
+        mc = renamed_mc or MailingContact.search([("email", "=ilike", email)], limit=1)
         if not mc:
             name = (partner.name if partner else None) or email
             mc = MailingContact.create({"name": name, "email": email})
