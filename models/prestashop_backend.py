@@ -865,7 +865,17 @@ class PrestashopBackend(models.Model):
                 if want:
                     mc = get_or_create_mc(email, partner)
                     if not mc:
-                        skipped += 1
+                        # In preview mode, get_or_create_mc returns None when the
+                        # mailing.contact does not exist yet (preview never writes).
+                        # The real sync would create it and subscribe it — count it
+                        # as a would-be subscribe so the preview reflects reality.
+                        if preview:
+                            if email in blacklisted_emails:
+                                opt_out_skipped += 1
+                            else:
+                                subscribe_actions += 1
+                        else:
+                            skipped += 1
                         continue
 
                     if is_globally_blocked(email, mc):
