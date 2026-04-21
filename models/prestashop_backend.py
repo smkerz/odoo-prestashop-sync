@@ -743,8 +743,14 @@ class PrestashopBackend(models.Model):
         presta_to_partner = {str(m.prestashop_id): m.partner_id.id for m in maps if m.prestashop_id and m.partner_id}
 
         # Desired subscription sets (partner_id)
+        # IMPORTANT: news_ok / offers_ok track whether the PrestaShop API call
+        # succeeded. If it failed (e.g. Cloudflare 403, network error), we MUST
+        # NOT proceed with the unsubscribe pass — an empty desired set would
+        # opt-out every mapped contact in the list.
         desired_news = set()
         desired_offers = set()
+        news_ok = False
+        offers_ok = False
 
         try:
             ids_news = set(client.list_newsletter_customer_ids(
@@ -753,9 +759,11 @@ class PrestashopBackend(models.Model):
                 max_total=int(self.customer_max_per_run or 5000),
             ))
             desired_news = {presta_to_partner[i] for i in ids_news if i in presta_to_partner}
+            news_ok = True
         except Exception as e:
-            self._log("sync_email_marketing", "warning", "Failed to compute Newsletter audience from PrestaShop.", details=str(e))
-            desired_news = set()
+            self._log("sync_email_marketing", "error",
+                      "Failed to compute Newsletter audience from PrestaShop. Skipping newsletter sync to avoid mass unsubscribe.",
+                      details=str(e))
 
         try:
             ids_off = set(client.list_optin_customer_ids(
@@ -764,9 +772,11 @@ class PrestashopBackend(models.Model):
                 max_total=int(self.customer_max_per_run or 5000),
             ))
             desired_offers = {presta_to_partner[i] for i in ids_off if i in presta_to_partner}
+            offers_ok = True
         except Exception as e:
-            self._log("sync_email_marketing", "warning", "Failed to compute Partner Offers audience from PrestaShop.", details=str(e))
-            desired_offers = set()
+            self._log("sync_email_marketing", "error",
+                      "Failed to compute Partner Offers audience from PrestaShop. Skipping offers sync to avoid mass unsubscribe.",
+                      details=str(e))
 
         try:
             MailingContact = self.env["mailing.contact"].sudo()
@@ -913,9 +923,11 @@ class PrestashopBackend(models.Model):
                 "list_opt_out_skipped": list_opt_out_skipped,
             }
 
+        empty_result = {"subscribe": 0, "unsubscribe": 0, "skipped": 0,
+                        "opt_out_skipped": 0, "list_opt_out_skipped": 0, "aborted": True}
         return {
-            "newsletter": sync_one_list(list_news, desired_news, desired_news_emails),
-            "offers": sync_one_list(list_offers, desired_offers),
+            "newsletter": sync_one_list(list_news, desired_news, desired_news_emails) if news_ok else dict(empty_result),
+            "offers": sync_one_list(list_offers, desired_offers) if offers_ok else dict(empty_result),
         }
 
     def _fetch_and_create_customer_from_webhook(self, prestashop_id: str):
