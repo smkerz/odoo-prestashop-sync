@@ -1034,24 +1034,54 @@ class PrestashopBackend(models.Model):
         optin = 1 if to_bool(payload.get("optin")) else 0
 
         email_only = payload.get("email_only", False)
+        customer_id = (payload.get("customer_id") or "").strip()
+        raw_email = payload.get("email") or ""
 
         Partner = self.env["res.partner"].sudo().with_context(tracking_disable=True, active_test=False)
-        partner = Partner.search([("email", "=ilike", email)], limit=1)
-        if partner and not partner.active:
-            partner.write({"active": True})
-        if not partner:
-            # Try to create the customer automatically if customer_id is provided
-            customer_id = payload.get("customer_id", "").strip()
-            # Only try to create if customer_id is valid (not 0 or empty)
-            if customer_id and customer_id != "0":
-                try:
-                    partner = self._fetch_and_create_customer_from_webhook(customer_id)
-                except Exception as e:
-                    self._log("sync_consents", "error", f"Webhook: failed to create customer {customer_id}", details=str(e))
+        partner = None
 
-            if not partner and not email_only:
-                self._log("sync_consents", "warning", "Webhook: partner not found and could not be created", details=email)
-                return {"status": "skipped", "message": "partner not found"}
+        # Prefer map lookup for registered customers — handles email changes on
+        # PrestaShop side. Without this, renaming an email in PrestaShop would
+        # orphan the Odoo partner (still referenced by the old email).
+        if customer_id and customer_id != "0":
+            map_rec = self.env["prestashop.customer.map"].sudo().search([
+                ("backend_id", "=", self.id),
+                ("prestashop_id", "=", customer_id),
+            ], limit=1)
+            if map_rec and map_rec.partner_id:
+                partner = map_rec.partner_id
+                if not partner.active:
+                    partner.write({"active": True})
+                old_email = (partner.email or "").strip().lower()
+                if old_email and old_email != email:
+                    partner.sudo().with_context(tracking_disable=True).write({"email": raw_email})
+                    old_mc = self.env["mailing.contact"].sudo().search(
+                        [("email", "=ilike", old_email)], limit=1,
+                    )
+                    if old_mc:
+                        old_mc.sudo().write({"email": raw_email})
+                    self._log(
+                        "sync_consents", "info",
+                        f"Partner email updated from PrestaShop: {old_email} -> {email}",
+                        details=f"presta_id={customer_id}",
+                    )
+
+        # Fallback: email lookup (for email-only subs or unmapped partners)
+        if not partner:
+            partner = Partner.search([("email", "=ilike", email)], limit=1)
+            if partner and not partner.active:
+                partner.write({"active": True})
+
+        # Still not found: try to create via customer_id
+        if not partner and customer_id and customer_id != "0":
+            try:
+                partner = self._fetch_and_create_customer_from_webhook(customer_id)
+            except Exception as e:
+                self._log("sync_consents", "error", f"Webhook: failed to create customer {customer_id}", details=str(e))
+
+        if not partner and not email_only:
+            self._log("sync_consents", "warning", "Webhook: partner not found and could not be created", details=email)
+            return {"status": "skipped", "message": "partner not found"}
 
         if partner:
             def update_tag(tag, enabled):
