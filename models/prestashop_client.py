@@ -374,6 +374,40 @@ class PrestaShopClient:
             _logger.warning("Failed to fetch email-only subscribers: %s", e)
             return []
 
+    def unsubscribe_email_only_subscriber(self, email: str):
+        """Deactivate (active=0) an email-only subscriber on PrestaShop.
+
+        Posts to the same /module/prestashopodoo/emailsubscribers endpoint with
+        method POST and body email=<email>. Requires the prestashopodoo module
+        version that handles POST.
+
+        Returns the parsed JSON response dict, or None on failure.
+        Response shape: {"status": "ok"|"noop"|"error", "email": "...", "updated": N, "ids": [...]}
+        """
+        if not email:
+            return None
+        base = self.base_url.rstrip("/")
+        url = f"{base}/module/prestashopodoo/emailsubscribers"
+        params = {"ws_key": self.api_key}
+        try:
+            resp = requests.post(
+                url,
+                params=params,
+                data={"email": email},
+                timeout=self.timeout,
+                verify=self.verify_tls,
+            )
+            if resp.status_code == 404:
+                _logger.info("Email subscribers unsubscribe endpoint not available")
+                return None
+            if resp.status_code >= 300:
+                _logger.warning("Unsubscribe email-only returned %s: %s", resp.status_code, resp.text[:200])
+                return None
+            return resp.json()
+        except Exception as e:
+            _logger.warning("Failed to unsubscribe email-only %s: %s", email, e)
+            return None
+
 
     @staticmethod
     def _extract_list(root, container_tag: str, item_tag: str):

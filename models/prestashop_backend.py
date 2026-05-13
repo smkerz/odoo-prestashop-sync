@@ -1441,13 +1441,65 @@ class PrestashopBackend(models.Model):
                         prestashop_id=str(cid),
                     )
 
+        # === Email-only subscribers (no customer account on PS) ===
+        # The loop above only touches mapped customers. Email-only subs live in
+        # ps_emailsubscription and need a separate POST to the module endpoint
+        # to be deactivated. Two reasons to deactivate:
+        #   1. Email is in mail.blacklist (Stop reply, admin action)
+        #   2. Email has a mailing.contact in Odoo and is no longer subscribed
+        #      to the Newsletter list there (unsubscribe link click)
+        email_only_unsub = 0
+        try:
+            email_only_subs = client.list_email_only_subscribers()
+        except Exception as e:
+            email_only_subs = []
+            self._log("sync_consents_odoo_to_prestashop", "warning",
+                      "Failed to fetch email-only subs for opt-out push", details=str(e))
+
+        eo_active_emails = {
+            self._norm_email(s.get("email"))
+            for s in email_only_subs
+            if s.get("active") in ("1", 1) and s.get("email")
+        }
+        if eo_active_emails:
+            eo_emails_list = list(eo_active_emails)
+            eo_blacklisted = self._blacklisted_emails(eo_emails_list)
+
+            eo_to_unsub = set(eo_blacklisted)
+
+            # Also detect email-only with a mailing.contact opt'd out of the news list
+            eo_mc = MailingContact.search([("email", "in", eo_emails_list)])
+            for mc_rec in eo_mc:
+                em = self._norm_email(mc_rec.email)
+                if not em or em not in eo_active_emails:
+                    continue
+                if not _is_subscribed(mc_rec, list_news):
+                    eo_to_unsub.add(em)
+
+            for em in eo_to_unsub:
+                result = client.unsubscribe_email_only_subscriber(em)
+                if result and result.get("status") == "ok":
+                    email_only_unsub += int(result.get("updated") or 0)
+                elif result and result.get("status") == "noop":
+                    # Already inactive — fine
+                    pass
+                else:
+                    errors += 1
+                    self._log(
+                        "sync_consents_odoo_to_prestashop",
+                        "error",
+                        "Failed to unsubscribe email-only subscriber.",
+                        details=f"email={em} result={result!r}",
+                    )
+
         self._log(
             "sync_consents_odoo_to_prestashop",
             "ok" if errors == 0 else "warning",
             (
                 f"Odoo->PrestaShop consents sync done. updated_customers={updated}; errors={errors}; "
                 f"blacklisted_emails={updated_blacklist}; "
-                f"unsub_news_emails={updated_unsub_news}; unsub_offers_emails={updated_unsub_offers}"
+                f"unsub_news_emails={updated_unsub_news}; unsub_offers_emails={updated_unsub_offers}; "
+                f"email_only_unsub={email_only_unsub}"
             ),
         )
 
