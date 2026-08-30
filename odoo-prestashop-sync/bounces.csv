@@ -1,0 +1,102 @@
+file,email,bounce_type,status,action,diagnostic
+Bonjour__comment_s_est_d_roul_e_votre_exp_rience_a-20260528-840.eml,,unknown,,,
+Delivery_Status_Notification__Failure_-20260522-828.eml,info@the-broken-arm.com,hard,5.1.3,failed,smtp; The email account that you tried to reach does not
+failure_notice-20260522-827.eml,,unknown,,,
+Merci_pour_votre_demande-20260528-839.eml,,unknown,,,
+Non_remis___Accessoires_cheveux_fran_ais_pour_votr-20260528-829.eml,contact@regent-petite-france.com,hard,5.1.10,failed,smtp;550 5.1.10 RESOLVER.ADR.RecipientNotFound; Recipient not
+Rejected__Accessoires_cheveux_faits_main_pour_votr-20260511-747.eml,postmaster@salon-edouard7.fr,hard,5.2.2,failed,
+Rejected__Petite_question_rapide-20260521-830.eml,postmaster@salon-edouard7.fr,hard,5.2.2,failed,
+Undeliverable__Accessoires_cheveux_fran_ais_pour_v-20260528-777.eml,cannes@l-raphael.com,hard,5.1.10,failed,smtp;550 5.1.10 RESOLVER.ADR.RecipientNotFound; Recipient
+Undeliverable__Nouveau___La_barrette_ajour_e_arriv-20260609-795.eml,vmarks@key-systems.net,hard,5.0.350,failed,smtp;550 5.0.350 Remote server returned an error -> 550
+Undelivered_Mail_Returned_to_Sender-20260514-745.eml,georgyr@optonline.net,hard,5.1.1,failed,smtp; 550 5.1.1 RCPT TO:<georgyr@optonline.net> mailbox
+Undelivered_Mail_Returned_to_Sender-20260514-746.eml,test_mail_capture@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260517-748.eml,coolibenjo@ben.net,soft,4.4.3,failed,X-Postfix; Host or domain name not found. Name service error
+Undelivered_Mail_Returned_to_Sender-20260517-749.eml,mcdavidian.fr@buycodeshop.com,soft,4.4.1,failed,X-Postfix; connect to buycodeshop.com[162.255.119.117]:25:
+Undelivered_Mail_Returned_to_Sender-20260517-750.eml,clerveuslucnerjeanaravna@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260517-751.eml,contact@pharmaciedesgrandshommes.com,soft,4.4.1,failed,X-Postfix; connect to
+Undelivered_Mail_Returned_to_Sender-20260517-752.eml,contact@pharmacielafayettetoulouse.com,soft,4.4.1,failed,X-Postfix; connect to
+Undelivered_Mail_Returned_to_Sender-20260517-753.eml,infoif@perfumeriasif.com,soft,4.4.1,failed,X-Postfix; connect to i1.grupobodybell.com[194.69.250.75]:25:
+Undelivered_Mail_Returned_to_Sender-20260519-754.eml,salonpauline@home.nl,hard,5.1.1,failed,smtp; 550 5.1.1 MXIN501 mailbox salonpauline@home.nl unknown
+Undelivered_Mail_Returned_to_Sender-20260519-755.eml,westonmichael21@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260519-756.eml,j.ecsww22qqa@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260519-757.eml,je.csww22qqa@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260519-758.eml,cristina.atensia@hootmail.com,soft,4.4.1,failed,X-Postfix; connect to hootmail.com[20.231.239.246]:25:
+Undelivered_Mail_Returned_to_Sender-20260522-759.eml,customerservice@montaignemarket.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260522-760.eml,contact@nomaconceptstore.com,hard,5.4.4,failed,X-Postfix; Host or domain name not found. Name service error
+Undelivered_Mail_Returned_to_Sender-20260522-761.eml,bmarais@galerieslafayette.com,hard,5.1.1,failed,smtp; 550 5.1.1 User Unknown
+Undelivered_Mail_Returned_to_Sender-20260522-762.eml,hermes.courchevel@hermes.com,hard,5.1.1,failed,smtp; 550 5.1.1 User Unknown
+Undelivered_Mail_Returned_to_Sender-20260522-763.eml,interieur@trentotto.fr,hard,5.2.1,failed,smtp; 550-5.2.1 The email account that you tried to reach is
+Undelivered_Mail_Returned_to_Sender-20260522-764.eml,contact@ledressingdezankara.com,hard,5.0.0,failed,smtp; 550 Mailbox does not exist.
+Undelivered_Mail_Returned_to_Sender-20260524-765.eml,liana@4seasons.com,soft,4.4.1,failed,X-Postfix; connect to 4seasons.com[104.143.9.211]:25:
+Undelivered_Mail_Returned_to_Sender-20260524-766.eml,yzaparivannaya@keng.ru,soft,4.4.1,failed,X-Postfix; connect to mail.keng.ru[91.107.87.134]:25:
+Undelivered_Mail_Returned_to_Sender-20260525-767.eml,contact@pharmaciedesgrandshommes.com,soft,4.4.1,failed,X-Postfix; connect to
+Undelivered_Mail_Returned_to_Sender-20260525-768.eml,contact@pharmacielafayettetoulouse.com,soft,4.4.1,failed,X-Postfix; connect to
+Undelivered_Mail_Returned_to_Sender-20260525-769.eml,infoif@perfumeriasif.com,soft,4.4.1,failed,X-Postfix; connect to i2.grupobodybell.com[194.69.250.77]:25:
+Undelivered_Mail_Returned_to_Sender-20260527-770.eml,presse@groupegalerieslafayette.com,soft,4.4.1,failed,X-Postfix; connect to
+Undelivered_Mail_Returned_to_Sender-20260527-771.eml,info@bespoke.com,soft,4.4.1,failed,X-Postfix; connect to bespoke.com[45.77.200.164]:25:
+Undelivered_Mail_Returned_to_Sender-20260527-772.eml,contact@merci-merci.com,soft,4.4.4,failed,"smtp; 451 4.4.4 Mail received as unauthenticated, incoming to"
+Undelivered_Mail_Returned_to_Sender-20260528-773.eml,contact@maison-rouge.com,hard,5.4.1,failed,smtp; 550 5.4.1 Recipient address rejected: Access denied.
+Undelivered_Mail_Returned_to_Sender-20260528-774.eml,contact@hotel-kaya.com,hard,5.4.1,failed,smtp; 550 5.4.1 Recipient address rejected: Access denied.
+Undelivered_Mail_Returned_to_Sender-20260528-775.eml,spa@verchant.com,hard,5.0.0,failed,smtp; 550 unrouteable address
+Undelivered_Mail_Returned_to_Sender-20260528-776.eml,info@hotel-skidor.com,hard,5.7.1,failed,smtp; 554 5.7.1 <info@hotel-skidor.com>: Relay access denied
+Undelivered_Mail_Returned_to_Sender-20260528-778.eml,georgyr@optonline.net,hard,5.1.1,failed,smtp; 550 5.1.1 RCPT TO:<georgyr@optonline.net> mailbox
+Undelivered_Mail_Returned_to_Sender-20260528-779.eml,test_mail_capture@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260602-780.eml,clerveuslucnerjeanaravna@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260602-781.eml,coolibenjo@ben.net,soft,4.4.3,failed,X-Postfix; Host or domain name not found. Name service error
+Undelivered_Mail_Returned_to_Sender-20260602-782.eml,mcdavidian.fr@buycodeshop.com,soft,4.4.1,failed,X-Postfix; connect to buycodeshop.com[162.255.119.117]:25:
+Undelivered_Mail_Returned_to_Sender-20260602-783.eml,info@spa-annecy.com,soft,4.4.1,failed,X-Postfix; connect to adsl.spa-annecy.com[185.81.55.13]:25:
+Undelivered_Mail_Returned_to_Sender-20260602-784.eml,cristina.atensia@hootmail.com,soft,4.4.1,failed,X-Postfix; connect to hootmail.com[20.231.239.246]:25:
+Undelivered_Mail_Returned_to_Sender-20260602-785.eml,j.ecsww22qqa@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260602-786.eml,je.csww22qqa@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260602-787.eml,westonmichael21@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260609-788.eml,cbright297@aol.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260609-789.eml,gabrielle@korper.nl,hard,5.4.1,failed,smtp; 550 5.4.1 Recipient address rejected: Access denied.
+Undelivered_Mail_Returned_to_Sender-20260609-790.eml,jbenites@bricefi.com.ec,hard,5.4.4,failed,X-Postfix; Host or domain name not found. Name service error
+Undelivered_Mail_Returned_to_Sender-20260609-791.eml,jlindvall@yahoo.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260609-792.eml,office@ddrvcentre.com,hard,5.4.4,failed,X-Postfix; Host or domain name not found. Name service error
+Undelivered_Mail_Returned_to_Sender-20260609-793.eml,shinycorp@tuta.io,hard,5.7.1,failed,smtp; 550 5.7.1 <shinycorp@tuta.io>: Recipient address
+Undelivered_Mail_Returned_to_Sender-20260609-794.eml,test@testter.fr,hard,5.4.4,failed,X-Postfix; Host or domain name not found. Name service error
+Undelivered_Mail_Returned_to_Sender-20260611-796.eml,blndcute15@yahoo.com,hard,5.0.0,failed,"smtp; 554 30 Sorry, your message to blndcute15@yahoo.com"
+Undelivered_Mail_Returned_to_Sender-20260611-797.eml,camaroguy9513@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-798.eml,ccarroll0420@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-799.eml,chris.breeden@yahoo.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260611-800.eml,cieraluna@gmail.com,hard,5.2.1,failed,smtp; 550-5.2.1 The email account that you tried to reach is
+Undelivered_Mail_Returned_to_Sender-20260611-801.eml,bartbaker47@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-802.eml,example@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-803.eml,example@yahoo.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260611-804.eml,eileen.gay@icloud.com,hard,5.7.1,failed,smtp; 554 5.7.1 [CS01] Message rejected due to local policy.
+Undelivered_Mail_Returned_to_Sender-20260611-805.eml,gilded_forceman@yahoo.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260611-806.eml,jenniferj12232004@yahoo.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260611-807.eml,jessiewise537@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-808.eml,karla.meyers@yahoo.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260611-809.eml,ladalooks55@msn.com,hard,5.5.0,failed,smtp; 550 5.5.0 Requested action not taken: mailbox
+Undelivered_Mail_Returned_to_Sender-20260611-810.eml,pascalelaurenttran@icloud.com,hard,5.7.1,failed,smtp; 554 5.7.1 [CS01] Message rejected due to local policy.
+Undelivered_Mail_Returned_to_Sender-20260611-811.eml,makrqdidion1998@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-812.eml,laszloszorady@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-813.eml,lonettebarge@mac.com,hard,5.7.1,failed,smtp; 554 5.7.1 [CS01] Message rejected due to local policy.
+Undelivered_Mail_Returned_to_Sender-20260611-814.eml,loril6@mac.com,hard,5.7.1,failed,smtp; 554 5.7.1 [CS01] Message rejected due to local policy.
+Undelivered_Mail_Returned_to_Sender-20260611-815.eml,mc_bro88@yahoo.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260611-816.eml,mmkano@yahoo.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260611-817.eml,georgyr@optonline.net,hard,5.1.1,failed,smtp; 550 5.1.1 RCPT TO:<georgyr@optonline.net> mailbox
+Undelivered_Mail_Returned_to_Sender-20260611-818.eml,sayvester.pitts@yahoo.com,hard,5.0.0,failed,"smtp; 554 30 Sorry, your message to sayvester.pitts@yahoo.com"
+Undelivered_Mail_Returned_to_Sender-20260611-819.eml,sethrahul80@yahoo.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260611-820.eml,shanlong22@mac.com,hard,5.1.1,failed,smtp; 550 5.1.1 <shanlong22@mac.com>: user does not exist
+Undelivered_Mail_Returned_to_Sender-20260611-821.eml,ryanfegan7@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-822.eml,test_mail_capture@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-823.eml,ttari@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-824.eml,tribbyseth@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-825.eml,zalupa2@gmail.com,hard,5.1.1,failed,smtp; 550-5.1.1 The email account that you tried to reach
+Undelivered_Mail_Returned_to_Sender-20260611-826.eml,zack.holcombe@yahoo.com,hard,5.0.0,failed,"smtp; 552 1 Requested mail action aborted, mailbox not found"
+Undelivered_Mail_Returned_to_Sender-20260614-831.eml,clerveuslucnerjeanaravna@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260614-832.eml,admin@dantownms.com,soft,4.4.1,failed,X-Postfix; connect to dantownms.com[104.248.112.152]:25:
+Undelivered_Mail_Returned_to_Sender-20260614-833.eml,coolibenjo@ben.net,soft,4.4.3,failed,X-Postfix; Host or domain name not found. Name service error
+Undelivered_Mail_Returned_to_Sender-20260614-834.eml,mcdavidian.fr@buycodeshop.com,soft,4.4.1,failed,X-Postfix; connect to buycodeshop.com[162.255.119.117]:25:
+Undelivered_Mail_Returned_to_Sender-20260616-835.eml,bencool@cool.fr,hard,5.1.1,failed,smtp; 550 5.1.1 <bencool@cool.fr>: Recipient address
+Undelivered_Mail_Returned_to_Sender-20260616-836.eml,salonpauline@home.nl,hard,5.1.1,failed,smtp; 550 5.1.1 MXIN501 mailbox salonpauline@home.nl unknown
+Undelivered_Mail_Returned_to_Sender-20260616-837.eml,mary@accessoriesbymary.com,hard,5.2.2,failed,smtp; 552 5.2.2 <mary@accessoriesbymary.com> Quota exceeded
+Undelivered_Mail_Returned_to_Sender-20260616-841.eml,cristina.atensia@hootmail.com,soft,4.4.1,failed,X-Postfix; connect to hootmail.com[20.236.44.162]:25:
+Undelivered_Mail_Returned_to_Sender-20260616-842.eml,je.csww22qqa@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260616-843.eml,j.ecsww22qqa@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260616-844.eml,westonmichael21@gmail.com,soft,4.2.2,failed,smtp; 452-4.2.2 The recipient's inbox is out of storage
+Undelivered_Mail_Returned_to_Sender-20260616-845.eml,biancapanico1965@libero.it,soft,4.0.0,failed,smtp; 452 <biancapanico1965@libero.it> User quota exceeded
+_SPAM__Delivery_Status_Notification__Failure_-20260616-838.eml,bann.bautista@fourseasons.com,hard,5.0.0 (permanent failure),failed,smtp; 5.1.0 - Unknown address error 550-'5.4.1 Recipient
