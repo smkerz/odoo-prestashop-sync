@@ -180,6 +180,8 @@ if ($phase === 'setup') {
     check('webhook configured and enabled',
         Configuration::get('PSODOO_WEBHOOK_URL') && Configuration::get('PSODOO_WEBHOOK_SECRET') && Configuration::get('PSODOO_WEBHOOK_ENABLED'));
     check('ps_emailsubscription installed', (bool)Module::isInstalled('ps_emailsubscription'));
+    check('prestashopodoo is at least 1.3.2 (reports newsletter unsubscriptions)',
+        version_compare($module->version, '1.3.2', '>='), 'installed: ' . $module->version);
 
     createCustomer('c1news', 1, 0);
     createCustomer('c2offers', 0, 1);
@@ -229,7 +231,15 @@ if ($phase === 'setup') {
 
     newsletterForm(email('f2unsub'), '0');
     list($error, $ok) = newsletterForm(email('f2unsub'), '1');
-    check('form: unsubscription deactivates the row', !$error && $ok && (string)emailOnlyActive('f2unsub') === '0', (string)$error);
+    // For a visitor without account, ps_emailsubscription deletes the row.
+    check('form: unsubscription removes the subscription', !$error && $ok && (string)emailOnlyActive('f2unsub') !== '1', (string)$error);
+
+    createCustomer('c9unsub', 1, 0);
+    list($error, $ok) = newsletterForm(email('c9unsub'), '1');
+    $c = findCustomer('c9unsub');
+    check('form: a customer unsubscribing through the block gets newsletter=0',
+        !$error && $ok && $c && (int)$c->newsletter === 0,
+        $c ? "newsletter={$c->newsletter} error=$error" : 'customer not found');
 
     // An existing customer with partner offers uses the block to get the newsletter.
     createCustomer('c8block', 0, 1);

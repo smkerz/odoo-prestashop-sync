@@ -116,9 +116,10 @@ if PHASE == "check":
     check("c8: customer who used the newsletter block is on both lists (optin untouched)",
           subscribed("c8block", news) and subscribed("c8block", offers),
           "news=%s offers=%s" % (subscribed("c8block", news), subscribed("c8block", offers)))
-    # The form sends nothing on unsubscription (ps_emailsubscription returns before
-    # its "after" hook): the row is deactivated in the shop and the sync catches it.
-    check("f2: form unsubscription is not known yet, before the sync", subscribed("f2unsub", news))
+    # Reported by the prestashopodoo "before" hook (module >= 1.3.2): the shop
+    # deletes the row, so the sync could never see this unsubscription.
+    check("f2: form unsubscription of a visitor is known at once", opted_out("f2unsub", news))
+    check("c9: form unsubscription of a customer is known at once", opted_out("c9unsub", news))
 
     # --- what only the cron can see -------------------------------------------
     check("e4: still subscribed before the sync (deactivated in the shop without hook)", subscribed("e4deact", news))
@@ -126,7 +127,7 @@ if PHASE == "check":
     check("e4: consent sync opts out the row deactivated in the shop",
           opted_out("e4deact", news) and result["newsletter"].get("email_only_deactivated", 0) >= 1,
           "result=%s" % result["newsletter"])
-    check("f2: consent sync opts out the address unsubscribed through the form", opted_out("f2unsub", news))
+    check("f2 and c9: still opted out after the sync", opted_out("f2unsub", news) and opted_out("c9unsub", news))
     check("c8 and f1: still subscribed after the sync",
           subscribed("c8block", news) and subscribed("c8block", offers) and subscribed("f1sub", news))
     check("sync leaves the other test contacts as they were",

@@ -13,7 +13,7 @@ Both scripts refuse to run outside a test environment:
 
 - A test Odoo database with this module, one backend per test shop
   (base URL `https://dev....`, a Webservice key of that shop, a webhook secret).
-- On each test shop: module `prestashopodoo` installed and configured with the
+- On each test shop: module `prestashopodoo` (1.3.2 or later) installed and configured with the
   **test** Odoo webhook URL, the same secret and the backend ID.
 - The test Odoo must reach the shop's `/api/` and `/module/prestashopodoo/`
   URLs (if the shop is behind an HTTP password, exempt those two paths).
@@ -59,7 +59,8 @@ Each step prints `PASS` / `FAIL` lines and ends with `OK` or the number of failu
 | e4deact | row deactivated directly in the database | opted out by the consent sync (cron path) |
 | f1sub | real newsletter form, new address (then the same address again: refused) | mailing contact subscribed, no partner |
 | f3bad | real newsletter form, invalid address: refused | nothing |
-| f2unsub | real newsletter form, subscribed then unsubscribed | still subscribed until the consent sync, then opted out (the form sends nothing on unsubscription) |
+| f2unsub | real newsletter form, subscribed then unsubscribed (the shop deletes the row) | opted out at once (prestashopodoo >= 1.3.2) |
+| c9unsub | customer with newsletter unsubscribes through the newsletter form | opted out at once |
 | c8block | existing customer with partner offers uses the newsletter form | both lists, optin untouched |
 
 | Test contact | What Odoo does | Expected in the shop |
