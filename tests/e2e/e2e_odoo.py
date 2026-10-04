@@ -11,6 +11,7 @@ in this folder. Settings come from environment variables:
 pushes them, so that `e2e_shop.php ... verify` can check the way back.
 """
 import os
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 PRODUCTION_DATABASES = {"mcdavidian"}
@@ -78,6 +79,9 @@ print("== %s on database %s, backend %s, tag %s ==" % (PHASE, env.cr.dbname, bac
 if PHASE == "check":
     # --- what the shop sent through webhooks ---------------------------------
     p = partner("c1news")
+    check("test customers are new to Odoo (no id collision, tag used once)",
+          len(p) == 1 and p.create_date >= datetime.now() - timedelta(days=1),
+          "partners=%s created=%s" % (len(p), p.mapped("create_date")))
     mapped = env["prestashop.customer.map"].search([("backend_id", "=", backend.id), ("partner_id", "in", p.ids)])
     check("c1: customer created and mapped", len(p) == 1 and len(mapped) == 1)
     check("c1: tagged as PrestaShop customer",
@@ -114,15 +118,21 @@ if PHASE == "check":
           subscribed("c1news", news) and subscribed("e1sub", news) and opted_out("c3toggle", news))
 
     # --- revocations decided in Odoo, pushed to the shop ----------------------
+    # Opt-outs written straight on the subscription trigger nothing by themselves:
+    # this is the path the cron covers.
     subscription("c6optout", news).write({"opt_out": True})
     subscription("e3optout", news).write({"opt_out": True})
-    env["mail.blacklist"].sudo()._add(email("c7black"))
     plan = backend._push_opt_outs_to_prestashop(client, preview=True)
     print("push preview: %s" % plan)
+    check("preview announces the two test revocations", plan["customers"] >= 1 and plan["email_only"] >= 1, str(plan))
     stats = backend._push_opt_outs_to_prestashop(client, enforce_cap=False)
     print("push result:  %s" % stats)
-    check("push planned at least the three test revocations", plan["customers"] >= 2 and plan["email_only"] >= 1, str(plan))
-    check("push to the shop finished without error", stats["errors"] == 0 and not stats["aborted"], str(stats))
+    check("push applied them", stats["updated"] >= 1 and stats["email_only_unsub"] >= 1 and not stats["aborted"], str(stats))
+    again = backend._push_opt_outs_to_prestashop(client, preview=True)
+    check("nothing is planned twice", again["customers"] <= stats["errors"] and again["email_only"] == 0, str(again))
+
+    # Blacklisting pushes by itself, in real time (no explicit push here on purpose).
+    env["mail.blacklist"].sudo()._add(email("c7black"))
     env.cr.commit()
     print('Next: run e2e_shop.php with "verify".')
 

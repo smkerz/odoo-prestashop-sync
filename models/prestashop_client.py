@@ -216,6 +216,11 @@ class PrestaShopClient:
         """Return customer IDs with optin=1."""
         return self._list_customer_ids_with_flag("optin", batch_size, include_guests, max_total)
 
+    def _redact(self, text):
+        """Hide the Webservice key, which the module endpoints take in the URL."""
+        text = str(text)
+        return text.replace(self.api_key, "***") if self.api_key else text
+
     def _email_subscribers_url(self):
         """Front controller of the prestashopodoo module (not the Webservice API)."""
         return f"{self.base_url}/module/prestashopodoo/emailsubscribers"
@@ -252,7 +257,7 @@ class PrestaShopClient:
             data = resp.json()
             return data.get("subscribers", [])
         except Exception as e:
-            _logger.warning("Failed to fetch email-only subscribers: %s", e)
+            _logger.warning("Failed to fetch email-only subscribers: %s", self._redact(e))
             return []
 
     def unsubscribe_email_only_subscriber(self, email: str):
@@ -283,7 +288,7 @@ class PrestaShopClient:
                 return None
             return resp.json()
         except Exception as e:
-            _logger.warning("Failed to unsubscribe email-only %s: %s", email, e)
+            _logger.warning("Failed to unsubscribe email-only %s: %s", email, self._redact(e))
             return None
 
     def get_customer(self, customer_id: str):

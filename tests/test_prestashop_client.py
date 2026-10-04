@@ -195,6 +195,19 @@ class TestModuleEndpoints(ClientCase):
     def test_inactive_rows_on_request(self):
         self.assertEqual(len(self.client.list_email_only_subscribers(active_only=False)), 2)
 
+    def test_webservice_key_never_reaches_the_logs(self):
+        def unreachable(url, **kw):
+            raise OSError("cannot reach %s?ws_key=%s" % (url, kw["params"]["ws_key"]))
+        self.shop.get = self.shop.post = unreachable
+        self.module, self.client = load_client(self.shop)
+        with self.assertLogs(self.module._logger, level="WARNING") as logs:
+            self.assertEqual(self.client.list_email_only_subscribers(), [])
+            self.assertIsNone(self.client.unsubscribe_email_only_subscriber("a@example.invalid"))
+        self.assertEqual(len(logs.output), 2)
+        for line in logs.output:
+            self.assertNotIn("KEY", line)
+            self.assertIn("ws_key=***", line)
+
     def test_every_request_carries_the_user_agent(self):
         self.client.get_xml("languages")
         self.client.put("customers/1", "<x/>")
