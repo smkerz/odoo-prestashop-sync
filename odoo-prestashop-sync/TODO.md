@@ -15,7 +15,9 @@ Ordered by priority within each section.
 
 ### Medium priority
 
-- [ ] **Factor out `_lookup_partner_by_presta_id(prestashop_id)`** — the pattern "search `prestashop.customer.map` by (backend_id, prestashop_id), return partner, reactivate if inactive" is duplicated in at least four methods: `_apply_webhook_consents`, `_fetch_and_create_customer_from_webhook`, `_reimport_customer_by_presta_id`, `_import_customers`.
+- [ ] **Reuse the customer-map lookup in `_apply_webhook_consents`** — the three import paths now share `_upsert_partner_from_customer_node`; the webhook consents handler still has its own "search `prestashop.customer.map`, reactivate if inactive" lookup (it also handles the email rename, see next item).
+
+- [ ] **Odoo-side tests** — `tests/` only covers the API client and the webhook request checks, with stubs and no Odoo. The consent logic in `models/prestashop_backend.py` has no automated test; `test_battery.py` is a manual read-only script for the Odoo shell.
 
 - [ ] **Move email-rename logic into `_fetch_and_create_customer_from_webhook`** — the webhook consents handler handles partner+mc email rename inline. The fetch-and-create helper already renames the partner but not the `mailing.contact`. Moving the mc rename there would let every caller benefit, not just the webhook-consents path.
 

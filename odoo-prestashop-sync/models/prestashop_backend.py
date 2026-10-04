@@ -320,27 +320,29 @@ class PrestashopBackend(models.Model):
                 pass
 
     def _run_locked(self, operation: str, func):
-        """Run a callable under an advisory lock, with duration tracking."""
+        """Run a callable under an advisory lock."""
         self.ensure_one()
         lock_key = self._try_acquire_lock(operation)
         if not lock_key:
             raise UserError(_("This operation is already running for this backend: %s") % operation)
-        start = time.perf_counter()
         try:
             return func()
         finally:
             self._release_lock(lock_key)
+
+    def _notification(self, message, title=None, notif_type=None):
+        """Client action showing a toast to the user."""
+        params = {"title": title or _("PrestaShop"), "message": message, "sticky": False}
+        if notif_type:
+            params["type"] = notif_type
+        return {"type": "ir.actions.client", "tag": "display_notification", "params": params}
 
     def action_purge_logs(self):
         """Delete all sync logs for this backend."""
         self.ensure_one()
         count = self.env["prestashop.sync.log"].sudo().search_count([("backend_id", "=", self.id)])
         self.env["prestashop.sync.log"].sudo().search([("backend_id", "=", self.id)]).unlink()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {"title": _("PrestaShop"), "message": _("%d logs deleted.") % count, "sticky": False},
-        }
+        return self._notification(_("%d logs deleted.") % count)
 
     def action_test_connection(self):
         self.ensure_one()
@@ -349,11 +351,7 @@ class PrestashopBackend(models.Model):
             client.get_xml("languages", params={"display": "[id,name]"})
         except PrestaShopAPIError as e:
             raise UserError(_("Connection failed: %s") % e)
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {"title": _("PrestaShop"), "message": _("Connection successful."), "sticky": False},
-        }
+        return self._notification(_("Connection successful."))
 
     def action_test_webhook(self):
         """Complete bidirectional webhook test.
@@ -451,13 +449,13 @@ class PrestashopBackend(models.Model):
 
         if issues:
             error_msg = "Webhook configuration issues found:\n\n" + "\n\n".join(issues)
-            error_msg += f"\n\n📋 Expected configuration in PrestaShop module:\n"
+            error_msg += "\n\n📋 Expected configuration in PrestaShop module:\n"
             error_msg += f"  • URL:        {odoo_webhook_url}\n"
             error_msg += f"  • Secret:     {self.webhook_secret[:8]}... ({len(self.webhook_secret)} chars)\n"
             error_msg += f"  • Backend ID: {self.id}"
 
             self._log_outside_tx("sync_consents", "error", "Webhook config validation failed", details=error_msg)
-            raise UserError(_(error_msg))
+            raise UserError(error_msg)
 
         # 5. Trigger webhook test from PrestaShop
         prestashop_test_url = f"{self.base_url.rstrip('/')}/module/prestashopodoo/webhooktest?ws_key={self.api_key}"
@@ -501,27 +499,18 @@ class PrestashopBackend(models.Model):
 
         # Success!
         success_msg = (
-            f"✅ Complete webhook test successful!\n\n"
-            f"Validated:\n"
-            f"  • PrestaShop API connection\n"
+            "✅ Complete webhook test successful!\n\n"
+            "Validated:\n"
+            "  • PrestaShop API connection\n"
             f"  • Webhook URL matches: {odoo_webhook_url}\n"
-            f"  • Webhook secret matches\n"
-            f"  • PrestaShop → Odoo webhook delivery\n"
-            f"  • Odoo webhook signature validation"
+            "  • Webhook secret matches\n"
+            "  • PrestaShop → Odoo webhook delivery\n"
+            "  • Odoo webhook signature validation"
         )
 
         self._log_outside_tx("sync_consents", "ok", "Complete webhook test successful", details=success_msg)
 
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": _("PrestaShop Webhook Test"),
-                "message": _(success_msg),
-                "sticky": False,
-                "type": "success",
-            },
-        }
+        return self._notification(success_msg, title=_("PrestaShop Webhook Test"), notif_type="success")
 
 
     def action_import_orders(self):
@@ -640,6 +629,14 @@ class PrestashopBackend(models.Model):
         for fname in ("subscription_list_ids", "list_contact_list_ids", "subscription_ids"):
             if fname in model_or_record._fields:
                 return fname
+        return None
+
+    def _list_subscription(self, mc, list_rec):
+        """Return the subscription record linking a mailing contact to a list, or None."""
+        fname = self._discover_subscription_field(mc)
+        for sub in (mc[fname] if fname else []):
+            if sub.list_id.id == list_rec.id:
+                return sub
         return None
 
     def _blacklisted_emails(self, emails):
@@ -847,12 +844,8 @@ class PrestashopBackend(models.Model):
 
         def _is_list_opted_out(mc_rec, list_rec):
             """Check if contact has opt_out=True for a specific list."""
-            if not sub_field_name:
-                return False
-            for sub in getattr(mc_rec, sub_field_name, []):
-                if sub.list_id.id == list_rec.id:
-                    return bool(getattr(sub, "opt_out", False))
-            return False
+            sub = self._list_subscription(mc_rec, list_rec)
+            return sub is not None and bool(getattr(sub, "opt_out", False))
 
         def is_globally_blocked(email: str, mc_rec=None):
             if email in blacklisted_emails:
@@ -917,13 +910,8 @@ class PrestashopBackend(models.Model):
                         continue
 
                     # Set opt_out on subscription record, or remove from list
-                    sub = None
-                    if sub_field_name:
-                        for s in getattr(mc, sub_field_name, []):
-                            if s.list_id.id == list_rec.id:
-                                sub = s
-                                break
-                    if sub and hasattr(sub, "opt_out"):
+                    sub = self._list_subscription(mc, list_rec)
+                    if sub is not None and hasattr(sub, "opt_out"):
                         if not sub.opt_out:
                             if not preview:
                                 sub.write({"opt_out": True})
@@ -967,6 +955,54 @@ class PrestashopBackend(models.Model):
             "offers": sync_one_list(list_offers, desired_offers) if offers_ok else dict(empty_result),
         }
 
+    def _upsert_partner_from_customer_node(self, client, node, prestashop_id, tag, site_tag):
+        """Create or update the partner (and its mapping) of a PrestaShop <customer> node.
+
+        Matching: existing mapping first, then email (archived partners included,
+        and reactivated). Returns (partner, created).
+        """
+        self.ensure_one()
+        email = client._text(node.find("email"))
+        firstname = client._text(node.find("firstname"))
+        lastname = client._text(node.find("lastname"))
+        active = client._text(node.find("active"))
+
+        CustomerMap = self.env["prestashop.customer.map"].sudo()
+        Partner = self.env["res.partner"].sudo().with_context(tracking_disable=True)
+
+        map_rec = CustomerMap.search([
+            ("backend_id", "=", self.id),
+            ("prestashop_id", "=", prestashop_id),
+        ], limit=1)
+
+        partner = map_rec.partner_id if map_rec else False
+        if (not partner) and email:
+            partner = Partner.with_context(active_test=False).search([("email", "=", email)], limit=1)
+            if partner and not partner.active:
+                partner.write({"active": True})
+
+        vals = {
+            "name": (" ".join([firstname, lastname])).strip() or email or f"PrestaShop Customer {prestashop_id}",
+            "email": email or False,
+            "active": False if active == "0" else True,
+            "customer_rank": 1,
+        }
+
+        created = not partner
+        if partner:
+            partner.write(vals)
+            partner.write({"category_id": [(4, tag.id), (4, site_tag.id)]})
+        else:
+            vals["category_id"] = [(6, 0, [tag.id, site_tag.id])]
+            partner = Partner.create(vals)
+        if not map_rec:
+            CustomerMap.create({
+                "backend_id": self.id,
+                "prestashop_id": prestashop_id,
+                "partner_id": partner.id,
+            })
+        return partner, created
+
     def _fetch_and_create_customer_from_webhook(self, prestashop_id: str):
         """Fetch customer from PrestaShop and create/update in Odoo.
 
@@ -990,54 +1026,14 @@ class PrestashopBackend(models.Model):
                 return None
 
             prestashop_id = client._text(node.find("id")) or str(prestashop_id)
-            email = client._text(node.find("email"))
-            firstname = client._text(node.find("firstname"))
-            lastname = client._text(node.find("lastname"))
-            active = client._text(node.find("active"))
-            is_guest = client._text(node.find("is_guest"))
 
-            if (not self.include_guest_customers) and is_guest == "1":
+            if (not self.include_guest_customers) and client._text(node.find("is_guest")) == "1":
                 self._log("webhook_create_customer", "info", f"Customer {prestashop_id} is a guest; skipped")
                 return None
 
-            # Check if mapping exists
-            map_rec = self.env["prestashop.customer.map"].sudo().search([
-                ("backend_id", "=", self.id),
-                ("prestashop_id", "=", prestashop_id),
-            ], limit=1)
-
-            partner = map_rec.partner_id if map_rec else False
-            if (not partner) and email:
-                partner = self.env["res.partner"].sudo().with_context(active_test=False).search([("email", "=", email)], limit=1)
-                if partner and not partner.active:
-                    partner.sudo().with_context(tracking_disable=True).write({"active": True})
-
-            vals = {
-                "name": (" ".join([firstname, lastname])).strip() or email or f"PrestaShop Customer {prestashop_id}",
-                "email": email or False,
-                "active": False if active == "0" else True,
-                "customer_rank": 1,
-            }
-
-            if partner:
-                partner.sudo().with_context(tracking_disable=True).write(vals)
-                partner.sudo().with_context(tracking_disable=True).write({"category_id": [(4, tag.id), (4, site_tag.id)]})
-                if not map_rec:
-                    self.env["prestashop.customer.map"].sudo().create({
-                        "backend_id": self.id,
-                        "prestashop_id": prestashop_id,
-                        "partner_id": partner.id,
-                    })
-                self._log("webhook_create_customer", "ok", f"Customer {prestashop_id} updated via webhook")
-            else:
-                vals["category_id"] = [(6, 0, [tag.id, site_tag.id])]
-                partner = self.env["res.partner"].sudo().with_context(tracking_disable=True).create(vals)
-                self.env["prestashop.customer.map"].sudo().create({
-                    "backend_id": self.id,
-                    "prestashop_id": prestashop_id,
-                    "partner_id": partner.id,
-                })
-                self._log("webhook_create_customer", "ok", f"Customer {prestashop_id} created via webhook")
+            partner, created = self._upsert_partner_from_customer_node(client, node, prestashop_id, tag, site_tag)
+            self._log("webhook_create_customer", "ok",
+                      f"Customer {prestashop_id} {'created' if created else 'updated'} via webhook")
 
             return partner
 
@@ -1144,22 +1140,15 @@ class PrestashopBackend(models.Model):
         if self.respect_odoo_opt_out and ("opt_out" in mc._fields) and bool(mc.opt_out):
             globally_blocked = True
 
-        _sub_fname = self._discover_subscription_field(mc)
-
         def set_subscription(list_rec, subscribe: bool):
-            sub = None
-            if _sub_fname:
-                for s in getattr(mc, _sub_fname, []):
-                    if s.list_id.id == list_rec.id:
-                        sub = s
-                        break
+            sub = self._list_subscription(mc, list_rec)
             if subscribe:
-                if sub and hasattr(sub, "opt_out") and sub.opt_out:
+                if sub is not None and hasattr(sub, "opt_out") and sub.opt_out:
                     sub.write({"opt_out": False})
                 if list_rec not in mc.list_ids:
                     mc.write({"list_ids": [(4, list_rec.id)]})
             else:
-                if sub and hasattr(sub, "opt_out"):
+                if sub is not None and hasattr(sub, "opt_out"):
                     if not sub.opt_out:
                         sub.write({"opt_out": True})
                 elif list_rec in mc.list_ids:
@@ -1290,18 +1279,7 @@ class PrestashopBackend(models.Model):
                     ])
                     matched_child = False
                     for child in existing_children:
-                        child_vals = {
-                            "street": child.street,
-                            "street2": child.street2,
-                            "zip": child.zip,
-                            "city": child.city,
-                            "country_id": child.country_id.id if child.country_id else False,
-                            "state_id": child.state_id.id if child.state_id else False,
-                            "phone": child.phone,
-                            "mobile": child.mobile,
-                            "company": child.commercial_company_name or child.company_name or child.name,
-                        }
-                        if self._address_signature(child_vals) == sig:
+                        if self._address_signature_of_partner(child) == sig:
                             matched_child = child
                             break
 
@@ -1412,19 +1390,12 @@ class PrestashopBackend(models.Model):
             if x and x.email:
                 mc_by_email[self._norm_email(x.email)] = x
 
-        sub_field_name = self._discover_subscription_field(MailingContact)
-
         def _is_subscribed(mc_rec, list_rec):
             """Check if contact is actively subscribed (in list AND not opted out)."""
             if list_rec not in mc_rec.list_ids:
                 return False
-            if sub_field_name:
-                for sub in getattr(mc_rec, sub_field_name, []):
-                    if sub.list_id.id == list_rec.id:
-                        if getattr(sub, "opt_out", False):
-                            return False
-                        return True
-            return True
+            sub = self._list_subscription(mc_rec, list_rec)
+            return not (sub is not None and getattr(sub, "opt_out", False))
 
         # Odoo list membership: emails actively subscribed to each list
         odoo_news_emails = set()
@@ -1556,11 +1527,7 @@ class PrestashopBackend(models.Model):
                 backend._log("preview_consents", "ok", msg)
                 return msg
             msg = backend._run_locked("preview_consents", run)
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {"title": _("PrestaShop"), "message": msg, "sticky": False},
-        }
+        return self._notification(msg)
 
     def action_sync_consents(self):
         for backend in self:
@@ -1580,11 +1547,7 @@ class PrestashopBackend(models.Model):
                 backend._log("sync_consents", "ok", msg, duration_sec=dur)
                 return msg
             msg = backend._run_locked("sync_consents", run)
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {"title": _("PrestaShop"), "message": msg, "sticky": False},
-        }
+        return self._notification(msg)
 
     def action_push_opt_outs_to_prestashop(self):
         """Sync consents from Odoo to PrestaShop (revocation-only).
@@ -1595,19 +1558,12 @@ class PrestashopBackend(models.Model):
         msg = ""
         for backend in self:
             def run():
-                start = time.perf_counter()
                 client = backend._client()
                 done, errors = backend._push_opt_outs_to_prestashop(client)
-                dur = time.perf_counter() - start
-                m = f"Consents synced to PrestaShop: updated={done}, errors={errors}"
-                return m
+                return f"Consents synced to PrestaShop: updated={done}, errors={errors}"
             msg = backend._run_locked("sync_consents_odoo_to_prestashop", run)
 
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {"title": _("PrestaShop"), "message": msg, "sticky": False},
-        }
+        return self._notification(msg)
 
     def action_import_customers(self):
         msg = ""
@@ -1635,11 +1591,7 @@ class PrestashopBackend(models.Model):
                     return _("Customer import finished. No new customers.")
                 return _("Customer import finished: %s.") % ", ".join(parts)
             msg = backend._run_locked("import_customers", run)
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {"title": _("PrestaShop"), "message": msg or _("Customer import finished."), "sticky": False},
-        }
+        return self._notification(msg or _("Customer import finished."))
 
     def action_open_reimport_customer_wizard(self):
         """Open a small wizard that reimports a single customer by PrestaShop ID.
@@ -1661,9 +1613,7 @@ class PrestashopBackend(models.Model):
         msg = ""
         for backend in self:
             def run():
-                start = time.perf_counter()
                 stats = backend._sync_addresses_batch(reset_cursor=False)
-                dur = time.perf_counter() - start
                 # _sync_addresses_batch already logs; here we only craft a user-facing message.
                 if stats.get("completed"):
                     return _("Addresses synced (full scan complete).")
@@ -1671,11 +1621,7 @@ class PrestashopBackend(models.Model):
                     "Address sync batch done. Click 'Sync Addresses' again to continue (cursor: %(cursor)s)."
                 ) % {"cursor": stats.get("cursor_map_id") or 0}
             msg = backend._run_locked("sync_addresses", run)
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {"title": _("PrestaShop"), "message": msg, "sticky": False},
-        }
+        return self._notification(msg)
 
     @api.model
     def _cron_full_scan_addresses_weekly(self):
@@ -1711,52 +1657,6 @@ class PrestashopBackend(models.Model):
             except UserError:
                 # Another run is already in progress; skip silently.
                 continue
-
-    def _extract_address_ids_from_customer(self, client, customer_node):
-        """Extract associated address IDs from a PrestaShop <customer> node.
-
-        PrestaShop associations structures vary a bit across versions/modules.
-        We support the common patterns:
-        - customer/associations/addresses/address[@id]
-        - customer/associations/addresses/address/id
-        - customer/associations/addresses/address[@xlink:href]
-        """
-        if customer_node is None:
-            return []
-
-        assoc = customer_node.find("associations")
-        if assoc is None:
-            return []
-
-        addresses_container = assoc.find("addresses")
-        if addresses_container is None:
-            # Some shops use 'address' directly under associations
-            addresses_container = assoc
-
-        ids = []
-        for addr in addresses_container.findall("address"):
-            # 1) attribute id
-            aid = (addr.get("id") or "").strip()
-            if not aid:
-                # 2) nested <id>
-                aid = client._text(addr.find("id"))
-            if not aid:
-                # 3) xlink:href contains the address resource URL
-                href = addr.get("{http://www.w3.org/1999/xlink}href") or addr.get("xlink:href") or ""
-                href = (href or "").strip()
-                if href:
-                    aid = href.rstrip("/").split("/")[-1]
-            if aid:
-                ids.append(aid)
-        # Deduplicate while preserving order
-        seen = set()
-        out = []
-        for x in ids:
-            if x in seen:
-                continue
-            seen.add(x)
-            out.append(x)
-        return out
 
     def _country_id_from_presta(self, client, presta_country_id, cache):
         if not presta_country_id:
@@ -1844,6 +1744,20 @@ class PrestashopBackend(models.Model):
             self._normalize_phone(vals.get("mobile")),
             self._clean_str(vals.get("company")),
         )
+
+    def _address_signature_of_partner(self, partner) -> tuple:
+        """Signature of an existing child address, comparable with _address_signature(vals)."""
+        return self._address_signature({
+            "street": partner.street,
+            "street2": partner.street2,
+            "zip": partner.zip,
+            "city": partner.city,
+            "country_id": partner.country_id.id if partner.country_id else False,
+            "state_id": partner.state_id.id if partner.state_id else False,
+            "phone": partner.phone,
+            "mobile": partner.mobile,
+            "company": partner.commercial_company_name or partner.company_name or partner.name,
+        })
 
     def _vals_from_presta_address(self, client, addr_node, parent_partner, country_cache, state_cache):
         firstname = client._text(addr_node.find("firstname"))
@@ -1972,18 +1886,7 @@ class PrestashopBackend(models.Model):
             sig_map = {}
             children = Partner.search([("parent_id", "=", parent_partner_id)])
             for c in children:
-                vals = {
-                    "street": c.street,
-                    "street2": c.street2,
-                    "zip": c.zip,
-                    "city": c.city,
-                    "country_id": c.country_id.id if c.country_id else False,
-                    "state_id": c.state_id.id if c.state_id else False,
-                    "phone": c.phone,
-                    "mobile": c.mobile,
-                    "company": c.commercial_company_name or c.company_name or c.name,
-                }
-                sig_map[self._address_signature(vals)] = c
+                sig_map[self._address_signature_of_partner(c)] = c
             child_sig_cache_by_parent[parent_partner_id] = sig_map
             return sig_map
 
@@ -2066,15 +1969,6 @@ class PrestashopBackend(models.Model):
             if batch_supported:
                 try:
                     addresses_by_customer = client.list_addresses_for_customers(cid_chunk, batch_size=500, max_total=0)
-                    # Defensive: older client implementations returned a flat list
-                    if isinstance(addresses_by_customer, list):
-                        grouped = {}
-                        for addr_node in addresses_by_customer:
-                            cid_val = client._text(addr_node.find("id_customer"))
-                            if not cid_val:
-                                continue
-                            grouped.setdefault(cid_val, []).append(addr_node)
-                        addresses_by_customer = grouped
                 except Exception:
                     batch_supported = False
                     addresses_by_customer = {}
@@ -2178,61 +2072,18 @@ class PrestashopBackend(models.Model):
             raise UserError(_("PrestaShop customer %s not found.") % prestashop_customer_id)
 
         prestashop_id = client._text(node.find("id")) or str(prestashop_customer_id)
-        email = client._text(node.find("email"))
-        firstname = client._text(node.find("firstname"))
-        lastname = client._text(node.find("lastname"))
-        active = client._text(node.find("active"))
-        is_guest = client._text(node.find("is_guest"))
-
-        if (not self.include_guest_customers) and is_guest == "1":
+        if (not self.include_guest_customers) and client._text(node.find("is_guest")) == "1":
             self._log(
                 "import_customers",
                 "warning",
                 f"Customer {prestashop_id} is a guest; skipped (include_guest_customers=False).",
                 prestashop_id=prestashop_id,
             )
-            return _(f"Customer {prestashop_id} is a guest; skipped.")
+            return _("Customer %s is a guest; skipped.") % prestashop_id
 
-        map_rec = self.env["prestashop.customer.map"].sudo().search([
-            ("backend_id", "=", self.id),
-            ("prestashop_id", "=", prestashop_id),
-        ], limit=1)
-
-        partner = map_rec.partner_id if map_rec else False
-        if (not partner) and email:
-            partner = self.env["res.partner"].sudo().with_context(active_test=False).search([("email", "=", email)], limit=1)
-            if partner and not partner.active:
-                partner.sudo().with_context(tracking_disable=True).write({"active": True})
-
-        vals = {
-            "name": (" ".join([firstname, lastname])).strip() or email or f"PrestaShop Customer {prestashop_id}",
-            "email": email or False,
-            "active": False if active == "0" else True,
-            "customer_rank": 1,
-        }
-
-        created = 0
-        updated = 0
-
-        if partner:
-            partner.sudo().with_context(tracking_disable=True).write(vals)
-            partner.sudo().with_context(tracking_disable=True).write({"category_id": [(4, tag.id), (4, site_tag.id)]})
-            if not map_rec:
-                self.env["prestashop.customer.map"].sudo().create({
-                    "backend_id": self.id,
-                    "prestashop_id": prestashop_id,
-                    "partner_id": partner.id,
-                })
-            updated = 1
-        else:
-            vals["category_id"] = [(6, 0, [tag.id, site_tag.id])]
-            partner = self.env["res.partner"].sudo().with_context(tracking_disable=True).create(vals)
-            self.env["prestashop.customer.map"].sudo().create({
-                "backend_id": self.id,
-                "prestashop_id": prestashop_id,
-                "partner_id": partner.id,
-            })
-            created = 1
+        partner, was_created = self._upsert_partner_from_customer_node(client, node, prestashop_id, tag, site_tag)
+        created = int(was_created)
+        updated = int(not was_created)
 
         self._log(
             "import_customers",
@@ -2247,7 +2098,9 @@ class PrestashopBackend(models.Model):
         except Exception:
             pass
 
-        return _(f"Customer {prestashop_id} reimported. created={created}, updated={updated}.")
+        return _("Customer %(id)s reimported. created=%(created)s, updated=%(updated)s.") % {
+            "id": prestashop_id, "created": created, "updated": updated,
+        }
 
     def _import_customers(self):
         self = self.with_context(tracking_disable=True)
@@ -2283,58 +2136,15 @@ class PrestashopBackend(models.Model):
                     max_seen_id = max(max_seen_id, int(prestashop_id or 0))
                 except Exception:
                     pass
-                email = client._text(node.find("email"))
-                firstname = client._text(node.find("firstname"))
-                lastname = client._text(node.find("lastname"))
-                active = client._text(node.find("active"))
-                is_guest = client._text(node.find("is_guest"))
-                newsletter = client._text(node.find("newsletter"))
-                optin = client._text(node.find("optin"))
-
-                if (not self.include_guest_customers) and is_guest == "1":
+                if (not self.include_guest_customers) and client._text(node.find("is_guest")) == "1":
                     skipped += 1
                     continue
 
-                map_rec = self.env["prestashop.customer.map"].sudo().search([
-                    ("backend_id", "=", self.id),
-                    ("prestashop_id", "=", prestashop_id),
-                ], limit=1)
-
-                partner = map_rec.partner_id if map_rec else False
-                if (not partner) and email:
-                    # Fallback: match by email (include archived contacts)
-                    partner = self.env["res.partner"].sudo().with_context(active_test=False).search([("email", "=", email)], limit=1)
-                    if partner and not partner.active:
-                        partner.sudo().with_context(tracking_disable=True).write({"active": True})
-
-                vals = {
-                    "name": (" ".join([firstname, lastname])).strip() or email or f"PrestaShop Customer {prestashop_id}",
-                    "email": email or False,
-                    "active": False if active == "0" else True,
-                    "customer_rank": 1,
-                }
-
-                if partner:
-                    partner.sudo().with_context(tracking_disable=True).write(vals)
-                    partner.sudo().with_context(tracking_disable=True).write({"category_id": [(4, tag.id), (4, site_tag.id)]})
-
-                    if not map_rec:
-                        self.env["prestashop.customer.map"].sudo().create({
-                            "backend_id": self.id,
-                            "prestashop_id": prestashop_id,
-                            "partner_id": partner.id,
-                        })
-                    updated += 1
-                else:
-                    vals["category_id"] = [(6, 0, [tag.id, site_tag.id])]
-                    partner = self.env["res.partner"].sudo().with_context(tracking_disable=True).create(vals)
-
-                    self.env["prestashop.customer.map"].sudo().create({
-                        "backend_id": self.id,
-                        "prestashop_id": prestashop_id,
-                        "partner_id": partner.id,
-                    })
+                _partner, was_created = self._upsert_partner_from_customer_node(client, node, prestashop_id, tag, site_tag)
+                if was_created:
                     created += 1
+                else:
+                    updated += 1
 
             except Exception as e:
                 errors += 1
