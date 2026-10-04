@@ -57,6 +57,10 @@ Each step prints `PASS` / `FAIL` lines and ends with `OK` or the number of failu
 | e1sub | newsletter block subscription (no account) | mailing contact subscribed, no partner |
 | e2unsub | newsletter block, then unsubscribed | opted out |
 | e4deact | row deactivated directly in the database | opted out by the consent sync (cron path) |
+| f1sub | real newsletter form, new address (then the same address again: refused) | mailing contact subscribed, no partner |
+| f3bad | real newsletter form, invalid address: refused | nothing |
+| f2unsub | real newsletter form, subscribed then unsubscribed | still subscribed until the consent sync, then opted out (the form sends nothing on unsubscription) |
+| c8block | existing customer with partner offers uses the newsletter form | both lists, optin untouched |
 
 | Test contact | What Odoo does | Expected in the shop |
 |---|---|---|
@@ -65,6 +69,8 @@ Each step prints `PASS` / `FAIL` lines and ends with `OK` or the number of failu
 | e3optout | Newsletter subscription opted out | email-only row deactivated |
 | c1news, c2offers, e1sub | nothing | unchanged |
 
-Not covered: the newsletter form itself (captcha) — the script reproduces what
-the form does after validation — and the signature check, which has its own
+The "real newsletter form" scenarios call the code of `ps_emailsubscription`
+directly; they need the captcha module (`eicaptcha`) disabled on the test shop.
+
+Not covered: the captcha itself, and the signature check, which has its own
 unit tests in `tests/test_webhook_controller.py`.

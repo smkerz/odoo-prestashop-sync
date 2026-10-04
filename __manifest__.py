@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     "name": "PrestaShop Connector (Basic)",
-    "version": "17.0.1.0.81",
+    "version": "17.0.1.0.82",
     "category": "Sales",
     "summary": "Basic PrestaShop 1.7 connector for Odoo 17: customers, addresses and marketing consents (Email Marketing lists per site, opt-out/blacklist pushed back to PrestaShop); order import disabled",
     "author": "Metrodyn",

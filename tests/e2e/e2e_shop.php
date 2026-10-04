@@ -123,6 +123,25 @@ function newsletterBlock($name, $subscribe)
     Hook::exec('actionNewsletterRegistrationAfter', array('email' => $email, 'action' => $subscribe ? '0' : '1', 'error' => null));
 }
 
+/**
+ * Submit the newsletter block through the real code of ps_emailsubscription (what the
+ * footer form runs once the captcha is passed). Returns array(error, confirmation).
+ */
+function newsletterForm($email, $action)
+{
+    $block = Module::getInstanceByName('ps_emailsubscription');
+    $_POST['email'] = $email;
+    $_POST['action'] = $action;
+    $block->newsletterRegistration();
+    unset($_POST['email'], $_POST['action']);
+    $readAndReset = Closure::bind(function () {
+        $result = array($this->error, $this->valid);
+        $this->error = $this->valid = null;
+        return $result;
+    }, $block, get_class($block));
+    return $readAndReset();
+}
+
 function emailOnlyActive($name)
 {
     return Db::getInstance()->getValue(
@@ -197,6 +216,29 @@ if ($phase === 'setup') {
         findCustomer('c1news'), findCustomer('c2offers'), findCustomer('c3toggle'), findCustomer('c4new'),
         findCustomer('c5addr'), findCustomer('c6optout'), findCustomer('c7black'),
     ))) === 7);
+
+    // --- the real newsletter form (needs the captcha module disabled on the test shop) ---
+    list($error, $ok) = newsletterForm(email('f1sub'), '0');
+    check('form: a new address is subscribed', !$error && $ok && (string)emailOnlyActive('f1sub') === '1', (string)$error);
+
+    list($error) = newsletterForm(email('f1sub'), '0');
+    check('form: the same address again is refused', (bool)$error && (string)emailOnlyActive('f1sub') === '1');
+
+    list($error) = newsletterForm("e2e-$tag-f3bad@@example", '0');
+    check('form: an invalid address is refused', (bool)$error);
+
+    newsletterForm(email('f2unsub'), '0');
+    list($error, $ok) = newsletterForm(email('f2unsub'), '1');
+    check('form: unsubscription deactivates the row', !$error && $ok && (string)emailOnlyActive('f2unsub') === '0', (string)$error);
+
+    // An existing customer with partner offers uses the block to get the newsletter.
+    createCustomer('c8block', 0, 1);
+    list($error) = newsletterForm(email('c8block'), '0');
+    $c = findCustomer('c8block');
+    check('form: an existing customer gets newsletter=1 and keeps optin',
+        !$error && $c && (int)$c->newsletter === 1 && (int)$c->optin === 1,
+        $c ? "newsletter={$c->newsletter} optin={$c->optin} error=$error" : 'customer not found');
+
     $failed = failedWebhooksSince($started);
     check('every webhook was accepted by Odoo', $failed === 0, "$failed failed, see the PrestaShop logs");
     echo "Next: run e2e_odoo.py with E2E_PHASE=check, then this script with \"verify\".\n";
@@ -217,6 +259,11 @@ if ($phase === 'verify') {
     check('c2: untouched customer still has optin', $c && (int)$c->optin === 1 && (int)$c->newsletter === 0);
     check('e3: Odoo opt-out deactivated the email-only row', (string)emailOnlyActive('e3optout') === '0');
     check('e1: untouched email-only row is still active', (string)emailOnlyActive('e1sub') === '1');
+    $c = findCustomer('c8block');
+    check('c8: customer who used the newsletter block kept both consents',
+        $c && (int)$c->newsletter === 1 && (int)$c->optin === 1,
+        $c ? "newsletter={$c->newsletter} optin={$c->optin}" : 'customer not found');
+    check('f1: address subscribed through the form is still active', (string)emailOnlyActive('f1sub') === '1');
 }
 
 if ($phase === 'cleanup') {
