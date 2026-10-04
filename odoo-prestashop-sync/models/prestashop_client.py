@@ -6,6 +6,10 @@ from xml.etree import ElementTree as ET
 
 _logger = logging.getLogger(__name__)
 
+# Explicit UA: the default "python-requests/x.y" is rejected (403) by the
+# anti-bot rules of the nginx in front of the shops.
+USER_AGENT = "OdooPrestashopConnector/1.0"
+
 class PrestaShopAPIError(Exception):
     pass
 
@@ -21,7 +25,7 @@ class PrestaShopClient:
 
     def _auth_header(self):
         token = base64.b64encode((self.api_key + ":").encode("utf-8")).decode("ascii")
-        return {"Authorization": f"Basic {token}"}
+        return {"Authorization": f"Basic {token}", "User-Agent": USER_AGENT}
 
     def _url(self, path: str):
         if path.startswith("http"):
@@ -343,12 +347,14 @@ class PrestaShopClient:
             return ids
 
 
-    def list_email_only_subscribers(self):
+    def list_email_only_subscribers(self, active_only: bool = True):
         """Return list of email-only newsletter subscribers from ps_emailsubscription.
 
         These are visitors who subscribed via the newsletter block without creating
         a customer account. Requires the prestashopodoo webhook module with the
         emailsubscribers endpoint installed.
+
+        With active_only=False, deactivated rows (active=0) are returned too.
 
         Returns a list of dicts: [{"email": "...", "active": "1"}, ...]
         """
@@ -358,10 +364,10 @@ class PrestaShopClient:
         url = f"{base}/module/prestashopodoo/emailsubscribers"
         params = {
             "ws_key": self.api_key,
-            "active_only": "1",
+            "active_only": "1" if active_only else "0",
         }
         try:
-            resp = requests.get(url, params=params, timeout=self.timeout, verify=self.verify_tls)
+            resp = requests.get(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=self.timeout, verify=self.verify_tls)
             if resp.status_code == 404:
                 _logger.info("Email subscribers endpoint not available (module not installed?)")
                 return []
@@ -394,6 +400,7 @@ class PrestaShopClient:
                 url,
                 params=params,
                 data={"email": email},
+                headers={"User-Agent": USER_AGENT},
                 timeout=self.timeout,
                 verify=self.verify_tls,
             )

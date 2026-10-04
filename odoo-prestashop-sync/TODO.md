@@ -51,7 +51,7 @@ Ordered by priority within each section.
 
 ## Config & data tasks (not code changes)
 
-- [ ] **Install the `emailsubscribers` endpoint on mcdavidian.hair** — the PS companion module `prestashopodoo` is installed on `.fr` but not on `.hair`. Without it, email-only newsletter subs (footer block) on the hair shop are invisible to Odoo sync. Deploy the module and configure the webhook secret.
+- [ ] **Check the `prestashopodoo` module config on mcdavidian.hair** — the module endpoints answer on `.hair` (observed 2026-10-04), but the webhook URL/secret configuration has not been verified. Run the backend "Test webhook" button.
 
 - [ ] **Deduplicate Colleen Shirazi on PS .fr** — customer IDs 954 and 982 share the same email. Pushes from Odoo towards 954 fail with PS error 141 ("email already in use"). Identify the correct record (the one with orders / recent activity) and delete or deactivate the other. This is what causes the recurring `errors=1` in push logs.
 
@@ -61,10 +61,12 @@ Ordered by priority within each section.
 
 ## Known gaps (documented, may or may not need fixing)
 
-- **Email-only subs removed from PS stay in Odoo**: intentional post-revert behaviour. The old orphan-cleanup loop was unsafe. Clean-up has to be manual for now. If a safer automation is desired later, it must come with a cap (see Sanity cap above) and explicit per-email logging.
+- **Email-only subs deleted from PS stay in Odoo**: intentional post-revert behaviour. The old orphan-cleanup loop was unsafe. Rows *deactivated* in PS (`active=0`) are opted out of the Newsletter list by the sync since 17.0.1.0.76 (explicit signal); rows *deleted* still need manual clean-up. If a safer automation is desired later, it must come with a cap (see Sanity cap above) and explicit per-email logging.
 
 - **PS webhook may not fire on email changes in some back-office flows**: observed during testing. The `actionObjectCustomerUpdateAfter` hook should catch all updates, but the delivery can be delayed up to several minutes due to the PS webhook queue. For bulk email changes, a manual `_import_customers` run remains the reliable path.
 
-- **PrestaShop API is behind Cloudflare (`.fr`, `.hair`)**: requires a Custom WAF rule `URI Path starts_with "/api/" and ip.src eq <Odoo server IP>` with Skip action, plus Bot Fight Mode OFF. Without this, all customer/address endpoints return 403 and the sync aborts. The current Odoo server IP is `141.95.154.67`.
+- **nginx on `.fr` / `.hair` rejects the `python-requests` User-Agent (403)**: the connector sends its own `OdooPrestashopConnector/1.0` User-Agent since 17.0.1.0.76. If the API returns 403 again, check the nginx anti-bot rules first.
+
+- **Cloudflare (`.fr`, `.hair`)**: on 2026-10-04 both shops answered directly from nginx (not proxied). If the Cloudflare proxy is re-enabled, the API needs a Custom WAF rule `URI Path starts_with "/api/" and ip.src eq <Odoo server IP>` with Skip action, plus Bot Fight Mode OFF; otherwise all customer/address endpoints return 403 and the sync aborts.
 
 - **`respect_odoo_opt_out=True`** on every backend: once a contact is opted-out in Odoo, the sync never re-subscribes them even if the PS flag flips back. Only the real-time webhook and an explicit user action can lift the opt_out. This is the intended governance behaviour.
