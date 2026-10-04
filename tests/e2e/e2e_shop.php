@@ -34,6 +34,8 @@ if (!$module || !Module::isInstalled('prestashopodoo')) {
     exit(2);
 }
 
+const E2E_FIRST_ID = 9000000;
+
 $failures = 0;
 
 function email($name)
@@ -138,6 +140,23 @@ function failedWebhooksSince($since)
 echo "== $phase on $domain, tag $tag ==\n";
 
 if ($phase === 'setup') {
+    $existing = (int)Db::getInstance()->getValue(
+        'SELECT COUNT(*) FROM ' . _DB_PREFIX_ . 'customer WHERE email LIKE "' . pSQL("e2e-$tag-") . '%@example.invalid"'
+    );
+    if ($existing) {
+        fwrite(STDERR, "REFUSED: tag \"$tag\" was already used on this shop ($existing test customers). Run cleanup, or pick another tag.\n");
+        exit(2);
+    }
+    // A test shop is an older copy of the real one, and the test Odoo a copy of the
+    // real Odoo: new ids handed out here would be ids Odoo already knows as someone
+    // else. Jump well past them so that test customers and addresses are really new.
+    foreach (array('customer' => 'id_customer', 'address' => 'id_address') as $table => $key) {
+        $max = (int)Db::getInstance()->getValue('SELECT MAX(' . $key . ') FROM ' . _DB_PREFIX_ . $table);
+        if ($max < E2E_FIRST_ID) {
+            Db::getInstance()->execute('ALTER TABLE ' . _DB_PREFIX_ . $table . ' AUTO_INCREMENT = ' . E2E_FIRST_ID);
+            echo "ids of new {$table}s on this test shop now start at " . E2E_FIRST_ID . "\n";
+        }
+    }
     $started = date('Y-m-d H:i:s');
     check('webhook configured and enabled',
         Configuration::get('PSODOO_WEBHOOK_URL') && Configuration::get('PSODOO_WEBHOOK_SECRET') && Configuration::get('PSODOO_WEBHOOK_ENABLED'));

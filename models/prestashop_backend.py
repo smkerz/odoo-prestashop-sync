@@ -408,7 +408,8 @@ class PrestashopBackend(models.Model):
                 verify=bool(self.verify_tls),
             )
         except Exception as e:
-            self._log_outside_tx("sync_consents", "error", "Failed to read PrestaShop webhook config", details=str(e))
+            e = client._redact(e)
+            self._log_outside_tx("sync_consents", "error", "Failed to read PrestaShop webhook config", details=e)
             raise UserError(_(
                 "Could not read PrestaShop webhook configuration.\n\n"
                 "Make sure the PrestaShop module has the webhook config endpoint installed.\n\n"
@@ -477,7 +478,8 @@ class PrestashopBackend(models.Model):
                 verify=bool(self.verify_tls),
             )
         except Exception as e:
-            self._log_outside_tx("sync_consents", "error", "Failed to trigger PrestaShop webhook test", details=str(e))
+            e = client._redact(e)
+            self._log_outside_tx("sync_consents", "error", "Failed to trigger PrestaShop webhook test", details=e)
             raise UserError(_(
                 "Could not trigger webhook test from PrestaShop.\n\n"
                 "Make sure the PrestaShop module has the webhook test endpoint installed.\n\n"
