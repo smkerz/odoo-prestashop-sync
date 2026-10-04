@@ -34,12 +34,4 @@ class PrestashopReimportCustomerWizard(models.TransientModel):
 
         msg = self.backend_id._reimport_customer_by_presta_id(int(self.prestashop_customer_id))
 
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": _("PrestaShop"),
-                "message": msg or _("Customer reimport finished."),
-                "sticky": False,
-            },
-        }
+        return self.backend_id._notification(msg or _("Customer reimport finished."))

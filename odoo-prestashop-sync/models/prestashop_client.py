@@ -10,6 +10,9 @@ _logger = logging.getLogger(__name__)
 # anti-bot rules of the nginx in front of the shops.
 USER_AGENT = "OdooPrestashopConnector/1.0"
 
+# PrestaShop Webservice error 32, returned when a filter is not supported.
+UNKNOWN_FILTER = "This filter does not exist"
+
 class PrestaShopAPIError(Exception):
     pass
 
@@ -74,24 +77,56 @@ class PrestaShopClient:
             return default
         return (node.text or "").strip()
 
-    def list_orders_since(self, dt_str: str, limit: int = 200):
+    @staticmethod
+    def _extract_list(root, container_tag: str, item_tag: str):
+        if root is None:
+            return []
+        container = root.find(container_tag)
+        if container is None:
+            return []
+        return list(container.findall(item_tag))
+
+    def _list_incremental(self, resource: str, item_tag: str, after_id: int, batch_size: int, max_total: int, extra_params=None):
+        """Fetch full nodes of a resource in ascending id order, starting after `after_id`.
+
+        Id-based pagination is the most compatible approach across PrestaShop 1.7
+        instances, as some shops reject filtering on date_add.
         """
-        dt_str: 'YYYY-MM-DD HH:MM:SS' or 'YYYY-MM-DD'
-        """
-        params = {
-            "display": "full",
-            "limit": str(limit),
-            "filter[date_add]": f"[>={dt_str}]",
-            "sort": "[date_add_ASC]",
-        }
-        root = self.get_xml("orders", params=params)
-        orders = []
-        orders_node = root.find("orders")
-        if orders_node is None:
-            return orders
-        for order in orders_node.findall("order"):
-            orders.append(order)
-        return orders
+        batch_size = int(batch_size or 200)
+        if batch_size <= 0:
+            batch_size = 200
+        max_total = int(max_total or 0)
+
+        results = []
+        last_id = int(after_id or 0)
+
+        while True:
+            params = {
+                "display": "full",
+                "limit": f"0,{batch_size}",
+                "sort": "[id_ASC]",
+                # Some PrestaShop instances expect an explicit upper bound.
+                "filter[id]": f"[{last_id + 1},999999999]",
+            }
+            params.update(extra_params or {})
+
+            root = self.get_xml(resource, params=params)
+            batch = self._extract_list(root, resource, item_tag)
+            if not batch:
+                break
+
+            results.extend(batch)
+
+            try:
+                last_id = int(self._text(batch[-1].find("id")) or last_id)
+            except Exception:
+                # If parsing fails, avoid infinite loops by stopping.
+                break
+
+            if max_total and len(results) >= max_total:
+                break
+
+        return results
 
     def list_orders_latest(self, limit: int = 200):
         """Return the latest orders by ID (descending).
@@ -111,139 +146,20 @@ class PrestaShopClient:
         return self._extract_list(root, "orders", "order")
 
     def list_orders_incremental(self, after_id: int = 0, batch_size: int = 200, max_total: int = 5000):
-        """Iterate over orders incrementally, using id-based pagination.
-
-        This is the most compatible approach across PrestaShop 1.7 instances, as
-        some shops reject filtering on date_add.
-        """
-        after_id = int(after_id or 0)
-        batch_size = int(batch_size or 200)
-        max_total = int(max_total or 0)
-        if batch_size <= 0:
-            batch_size = 200
-
-        results = []
-        last_id = after_id
-        fetched = 0
-
-        while True:
-            params = {
-                "display": "full",
-                "limit": f"0,{batch_size}",
-                "sort": "[id_ASC]",
-                "filter[id]": f"[{last_id + 1},999999999]",
-            }
-            root = self.get_xml("orders", params=params)
-            batch = self._extract_list(root, "orders", "order")
-            if not batch:
-                break
-
-            results.extend(batch)
-            fetched += len(batch)
-
-            try:
-                last_id = int(self._text(batch[-1].find("id")) or last_id)
-            except Exception:
-                break
-
-            if max_total and fetched >= max_total:
-                break
-
-        return results
-
-    def get_customers_since(self, dt_str: str, limit: int = 1000, include_guests: bool = False):
-        """
-        List customers created since dt_str.
-        dt_str: 'YYYY-MM-DD HH:MM:SS' or 'YYYY-MM-DD'
-        """
-        # PrestaShop instances differ in which fields are filterable via Webservice.
-        # Some shops (or overrides) reject filtering on date_add. We therefore:
-        #  1) try date_add filtering
-        #  2) if the API rejects the filter, fall back to an id-based incremental list.
-        params = {
-            "display": "full",
-            # PrestaShop Webservice commonly expects the "offset,limit" form.
-            "limit": f"0,{int(limit)}",
-            "filter[date_add]": f"[>={dt_str}]",
-            "sort": "[date_add_ASC]",
-        }
-        if not include_guests:
-            params["filter[is_guest]"] = "0"
-
-        try:
-            root = self.get_xml("customers", params=params)
-            return self._extract_list(root, "customers", "customer")
-        except PrestaShopAPIError as e:
-            msg = str(e)
-            # Error code 32 in Presta often means "This filter does not exist".
-            # When that happens, we retry without date filters.
-            if "This filter does not exist" not in msg:
-                raise
-
-        # Fallback: list customers without date filters (id sort) and apply guest filter if requested.
-        params2 = {
-            "display": "full",
-            "limit": f"0,{int(limit)}",
-            "sort": "[id_ASC]",
-        }
-        if not include_guests:
-            params2["filter[is_guest]"] = "0"
-        root2 = self.get_xml("customers", params=params2)
-        return self._extract_list(root2, "customers", "customer")
+        """Iterate over orders incrementally, using id-based pagination."""
+        return self._list_incremental("orders", "order", after_id, batch_size, max_total)
 
     def list_customers_incremental(self, after_id: int = 0, batch_size: int = 200, include_guests: bool = False, max_total: int = 5000):
-        """Iterate over customers incrementally, using id-based pagination.
+        """Iterate over customers incrementally, using id-based pagination."""
+        extra = {} if include_guests else {"filter[is_guest]": "0"}
+        return self._list_incremental("customers", "customer", after_id, batch_size, max_total, extra)
 
-        This is the most compatible approach across PrestaShop 1.7 instances.
-        """
-        after_id = int(after_id or 0)
-        batch_size = int(batch_size or 200)
-        max_total = int(max_total or 0)
-        if batch_size <= 0:
-            batch_size = 200
+    def _list_customer_ids_with_flag(self, flag: str, batch_size: int = 200, include_guests: bool = True, max_total: int = 0):
+        """Return the IDs of customers whose `flag` field (newsletter / optin) is 1.
 
-        results = []
-        last_id = after_id
-        fetched = 0
-
-        while True:
-            params = {
-                "display": "full",
-                "limit": f"0,{batch_size}",
-                "sort": "[id_ASC]",
-                # Some PrestaShop instances expect an explicit upper bound.
-                "filter[id]": f"[{last_id + 1},999999999]",
-            }
-            if not include_guests:
-                params["filter[is_guest]"] = "0"
-
-            root = self.get_xml("customers", params=params)
-            batch = self._extract_list(root, "customers", "customer")
-            if not batch:
-                break
-
-            results.extend(batch)
-            fetched += len(batch)
-
-            # Update last_id from the last item in the batch
-            try:
-                last_id = int(self._text(batch[-1].find("id")) or last_id)
-            except Exception:
-                # If parsing fails, avoid infinite loops by stopping.
-                break
-
-            if max_total and fetched >= max_total:
-                break
-
-        return results
-
-
-    def list_newsletter_customer_ids(self, batch_size: int = 200, include_guests: bool = True, max_total: int = 0):
-        """Return customer IDs with newsletter=1.
-
-        Primary path uses the Webservice filter[newsletter]=1.
+        Primary path uses the Webservice filter[<flag>]=1.
         Some PrestaShop deployments reject that filter (error code 32). In that case
-        we fall back to scanning customers and reading the `newsletter` flag.
+        we fall back to scanning customers and reading the flag.
         """
         try:
             batch_size = int(batch_size or 200)
@@ -262,7 +178,7 @@ class PrestaShopClient:
 
                 params = {
                     "display": "[id]",
-                    "filter[newsletter]": "1",
+                    f"filter[{flag}]": "1",
                     "limit": f"{offset},{limit}",
                 }
                 if not include_guests:
@@ -288,64 +204,21 @@ class PrestaShopClient:
             )
             for n in nodes:
                 cid = self._text(n.find("id"))
-                if cid and self._text(n.find("newsletter")) == "1":
+                if cid and self._text(n.find(flag)) == "1":
                     ids.append(cid)
             return ids
 
+    def list_newsletter_customer_ids(self, batch_size: int = 200, include_guests: bool = True, max_total: int = 0):
+        """Return customer IDs with newsletter=1."""
+        return self._list_customer_ids_with_flag("newsletter", batch_size, include_guests, max_total)
 
     def list_optin_customer_ids(self, batch_size: int = 200, include_guests: bool = True, max_total: int = 0):
-        """Return customer IDs with optin=1.
+        """Return customer IDs with optin=1."""
+        return self._list_customer_ids_with_flag("optin", batch_size, include_guests, max_total)
 
-        Primary path uses the Webservice filter[optin]=1.
-        Some PrestaShop deployments reject that filter (error code 32). In that case
-        we fall back to scanning customers and reading the `optin` flag.
-        """
-        try:
-            batch_size = int(batch_size or 200)
-            if batch_size <= 0:
-                batch_size = 200
-            max_total = int(max_total or 0)
-            offset = 0
-            ids = []
-            while True:
-                limit = batch_size
-                if max_total:
-                    remaining = max_total - len(ids)
-                    if remaining <= 0:
-                        break
-                    limit = min(limit, remaining)
-
-                params = {
-                    "display": "[id]",
-                    "filter[optin]": "1",
-                    "limit": f"{offset},{limit}",
-                }
-                if not include_guests:
-                    params["filter[is_guest]"] = "0"
-
-                root = self.get_xml("customers", params=params)
-                batch = [self._text(n.find("id")) for n in root.findall(".//customer") if self._text(n.find("id"))]
-                if not batch:
-                    break
-                ids.extend(batch)
-                offset += limit
-                if len(batch) < limit:
-                    break
-            return ids
-        except PrestaShopAPIError:
-            ids = []
-            nodes = self.list_customers_incremental(
-                after_id=0,
-                batch_size=batch_size,
-                include_guests=include_guests,
-                max_total=max_total or 100000,
-            )
-            for n in nodes:
-                cid = self._text(n.find("id"))
-                if cid and self._text(n.find("optin")) == "1":
-                    ids.append(cid)
-            return ids
-
+    def _email_subscribers_url(self):
+        """Front controller of the prestashopodoo module (not the Webservice API)."""
+        return f"{self.base_url}/module/prestashopodoo/emailsubscribers"
 
     def list_email_only_subscribers(self, active_only: bool = True):
         """Return list of email-only newsletter subscribers from ps_emailsubscription.
@@ -358,16 +231,18 @@ class PrestaShopClient:
 
         Returns a list of dicts: [{"email": "...", "active": "1"}, ...]
         """
-        # Build the front controller URL (not the webservice API)
-        # URL: /module/prestashopodoo/emailsubscribers?ws_key=API_KEY&active_only=1
-        base = self.base_url.rstrip("/")
-        url = f"{base}/module/prestashopodoo/emailsubscribers"
         params = {
             "ws_key": self.api_key,
             "active_only": "1" if active_only else "0",
         }
         try:
-            resp = requests.get(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=self.timeout, verify=self.verify_tls)
+            resp = requests.get(
+                self._email_subscribers_url(),
+                params=params,
+                headers={"User-Agent": USER_AGENT},
+                timeout=self.timeout,
+                verify=self.verify_tls,
+            )
             if resp.status_code == 404:
                 _logger.info("Email subscribers endpoint not available (module not installed?)")
                 return []
@@ -383,22 +258,18 @@ class PrestaShopClient:
     def unsubscribe_email_only_subscriber(self, email: str):
         """Deactivate (active=0) an email-only subscriber on PrestaShop.
 
-        Posts to the same /module/prestashopodoo/emailsubscribers endpoint with
-        method POST and body email=<email>. Requires the prestashopodoo module
-        version that handles POST.
+        Posts email=<email> to the emailsubscribers endpoint. Requires the
+        prestashopodoo module version that handles POST.
 
         Returns the parsed JSON response dict, or None on failure.
         Response shape: {"status": "ok"|"noop"|"error", "email": "...", "updated": N, "ids": [...]}
         """
         if not email:
             return None
-        base = self.base_url.rstrip("/")
-        url = f"{base}/module/prestashopodoo/emailsubscribers"
-        params = {"ws_key": self.api_key}
         try:
             resp = requests.post(
-                url,
-                params=params,
+                self._email_subscribers_url(),
+                params={"ws_key": self.api_key},
                 data={"email": email},
                 headers={"User-Agent": USER_AGENT},
                 timeout=self.timeout,
@@ -414,21 +285,6 @@ class PrestaShopClient:
         except Exception as e:
             _logger.warning("Failed to unsubscribe email-only %s: %s", email, e)
             return None
-
-
-    @staticmethod
-    def _extract_list(root, container_tag: str, item_tag: str):
-        items = []
-        if root is None:
-            return items
-        container = root.find(container_tag)
-        if container is None:
-            return items
-        for node in container.findall(item_tag):
-            items.append(node)
-        return items
-
-
 
     def get_customer(self, customer_id: str):
         root = self.get_xml(f"customers/{customer_id}")
@@ -474,79 +330,52 @@ class PrestaShopClient:
         self.put(f"customers/{customer_id}", xml_payload)
         return True
 
-    def list_addresses_for_customer(self, customer_id: str, batch_size: int = 200, max_total: int = 2000):
-        """Return address XML nodes for a given PrestaShop customer ID.
+    def _list_address_nodes(self, customer_filter: str, batch_size: int, max_total: int):
+        """Return address XML nodes matching a filter[id_customer] value.
 
-        Important: In PrestaShop 1.7, the customer Webservice resource typically does NOT expose
-        addresses as an association. The reliable way is to query the `addresses` resource filtered
-        by `id_customer`.
+        In PrestaShop 1.7, the customer Webservice resource typically does NOT expose
+        addresses as an association. The reliable way is to query the `addresses`
+        resource filtered by `id_customer`.
 
-        We try a filter-based query first (fast). If the instance rejects a specific filter
-        (error code 32: "This filter does not exist"), we retry with a reduced set of filters.
+        filter[deleted]=0 is added to reduce noise; if the instance rejects it
+        (error code 32), the query is retried without it.
         """
+        base_params = {
+            "display": "full",
+            "sort": "[id_ASC]",
+            "filter[id_customer]": customer_filter,
+        }
+        params = dict(base_params)
+        params["filter[deleted]"] = "0"
+
+        results = []
+        offset = 0
+        while True:
+            params["limit"] = f"{offset},{batch_size}"
+            try:
+                root = self.get_xml("addresses", params=params)
+            except PrestaShopAPIError as e:
+                if UNKNOWN_FILTER in str(e) and "filter[deleted]" in params:
+                    params = dict(base_params)
+                    continue
+                raise
+            batch = self._extract_list(root, "addresses", "address")
+            if not batch:
+                break
+            results.extend(batch)
+            if max_total and len(results) >= max_total:
+                results = results[:max_total]
+                break
+            offset += batch_size
+        return results
+
+    def list_addresses_for_customer(self, customer_id: str, batch_size: int = 200, max_total: int = 2000):
+        """Return the list of address XML nodes of one PrestaShop customer."""
         batch_size = int(batch_size or 200)
         if batch_size <= 0:
             batch_size = 200
         max_total = int(max_total or 0) or 2000
-
-        results = []
-
-        # Most shops accept filter[id_customer]. Some also accept filter[deleted].
-        base_params = {
-            "display": "full",
-            "limit": f"0,{batch_size}",
-            "sort": "[id_ASC]",
-            "filter[id_customer]": str(customer_id),
-        }
-
-        # First try with deleted filter to reduce noise.
-        params = dict(base_params)
-        params["filter[deleted]"] = "0"
-
-        try:
-            root = self.get_xml("addresses", params=params)
-        except PrestaShopAPIError as e:
-            if "This filter does not exist" in str(e):
-                # Retry without filter[deleted]
-                root = self.get_xml("addresses", params=base_params)
-            else:
-                raise
-
-        batch = self._extract_list(root, "addresses", "address")
-        results.extend(batch)
-
-        # In practice, per-customer addresses are few; we keep pagination simple.
-        # If the shop returns more than batch_size, we page using limit offsets.
-        offset = batch_size
-        while batch and len(results) < max_total:
-            params2 = dict(params)
-            params2["limit"] = f"{offset},{batch_size}"
-            try:
-                root2 = self.get_xml("addresses", params=params2)
-            except PrestaShopAPIError as e:
-                if "This filter does not exist" in str(e) and "filter[deleted]" in params2:
-                    # Retry without deleted filter
-                    params2 = dict(base_params)
-                    params2["limit"] = f"{offset},{batch_size}"
-                    root2 = self.get_xml("addresses", params=params2)
-                else:
-                    raise
-            batch = self._extract_list(root2, "addresses", "address")
-            if not batch:
-                break
-            results.extend(batch)
-            offset += batch_size
-
-        if max_total and len(results) > max_total:
-            results = results[:max_total]
-
-        grouped = {}
-        for addr in results:
-            cid = self._text(addr.find("id_customer"))
-            if not cid:
-                continue
-            grouped.setdefault(cid, []).append(addr)
-        return grouped
+        return self._list_address_nodes(str(customer_id), batch_size, max_total)
 
     def list_addresses_for_customers(self, customer_ids, batch_size: int = 500, max_total: int = 0):
         """Fetch addresses for multiple customers in one call.
@@ -566,57 +395,8 @@ class PrestaShopClient:
             batch_size = 500
         max_total = int(max_total or 0)
 
-        filter_val = "[" + "|".join(customer_ids) + "]"
-        base_params = {
-            "display": "full",
-            "limit": f"0,{batch_size}",
-            "sort": "[id_ASC]",
-            "filter[id_customer]": filter_val,
-        }
-
-        params = dict(base_params)
-        params["filter[deleted]"] = "0"
-
-        try:
-            root = self.get_xml("addresses", params=params)
-        except PrestaShopAPIError as e:
-            if "This filter does not exist" in str(e):
-                # Retry without deleted filter
-                root = self.get_xml("addresses", params=base_params)
-                params = dict(base_params)
-            else:
-                raise
-
-        results = self._extract_list(root, "addresses", "address")
-        offset = batch_size
-        batch = results
-
-        while batch:
-            if max_total and len(results) >= max_total:
-                results = results[:max_total]
-                break
-            params2 = dict(params)
-            params2["limit"] = f"{offset},{batch_size}"
-            try:
-                root2 = self.get_xml("addresses", params=params2)
-            except PrestaShopAPIError as e:
-                if "This filter does not exist" in str(e) and "filter[deleted]" in params2:
-                    params2 = dict(base_params)
-                    params2["limit"] = f"{offset},{batch_size}"
-                    root2 = self.get_xml("addresses", params=params2)
-                else:
-                    raise
-            batch = self._extract_list(root2, "addresses", "address")
-            if not batch:
-                break
-            results.extend(batch)
-            offset += batch_size
-
-        if max_total and len(results) > max_total:
-            results = results[:max_total]
-
         grouped = {}
-        for addr in results:
+        for addr in self._list_address_nodes("[" + "|".join(customer_ids) + "]", batch_size, max_total):
             cid = self._text(addr.find("id_customer"))
             if not cid:
                 continue

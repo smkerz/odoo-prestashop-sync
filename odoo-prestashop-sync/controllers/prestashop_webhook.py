@@ -33,42 +33,9 @@ class PrestashopWebhookController(http.Controller):
         website=False,
     )
     def webhook_consents(self, **kwargs):
-        _logger.info(
-            "Webhook consents hit: method=%s path=%s",
-            request.httprequest.method,
-            request.httprequest.path,
-        )
-        if request.httprequest.method != "POST":
-            return request.make_json_response({"status": "ok", "message": "use POST"})
-        body = request.httprequest.data or b""
-        if not body:
-            return request.make_json_response({"status": "error", "message": "empty body"}, status=400)
-
-        signature = request.httprequest.headers.get("X-Prestashop-Signature", "")
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except Exception:
-            return request.make_json_response({"status": "error", "message": "invalid json"}, status=400)
-
-        backend = self._find_backend(payload)
-        if not backend or not backend.webhook_secret:
-            _logger.warning("Webhook: backend not found. payload=%s", payload)
-            return request.make_json_response({"status": "error", "message": "backend not found"}, status=400)
-
-        expected = hmac.new(
-            backend.webhook_secret.encode("utf-8"),
-            body,
-            hashlib.sha256,
-        ).hexdigest()
-
-        if not hmac.compare_digest(expected, signature):
-            backend._log(
-                "sync_consents",
-                "warning",
-                "Webhook: invalid signature",
-                details=f"path={request.httprequest.path}",
-            )
-            return request.make_json_response({"status": "error", "message": "invalid signature"}, status=401)
+        backend, payload, error = self._read_signed_payload("Webhook", "sync_consents")
+        if error:
+            return error
 
         res = backend.sudo()._apply_webhook_consents(payload)
         backend._log(
@@ -88,42 +55,9 @@ class PrestashopWebhookController(http.Controller):
         website=False,
     )
     def webhook_addresses(self, **kwargs):
-        _logger.info(
-            "Webhook addresses hit: method=%s path=%s",
-            request.httprequest.method,
-            request.httprequest.path,
-        )
-        if request.httprequest.method != "POST":
-            return request.make_json_response({"status": "ok", "message": "use POST"})
-        body = request.httprequest.data or b""
-        if not body:
-            return request.make_json_response({"status": "error", "message": "empty body"}, status=400)
-
-        signature = request.httprequest.headers.get("X-Prestashop-Signature", "")
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except Exception:
-            return request.make_json_response({"status": "error", "message": "invalid json"}, status=400)
-
-        backend = self._find_backend(payload)
-        if not backend or not backend.webhook_secret:
-            _logger.warning("Webhook addresses: backend not found. payload=%s", payload)
-            return request.make_json_response({"status": "error", "message": "backend not found"}, status=400)
-
-        expected = hmac.new(
-            backend.webhook_secret.encode("utf-8"),
-            body,
-            hashlib.sha256,
-        ).hexdigest()
-
-        if not hmac.compare_digest(expected, signature):
-            backend._log(
-                "sync_addresses",
-                "warning",
-                "Webhook addresses: invalid signature",
-                details=f"path={request.httprequest.path}",
-            )
-            return request.make_json_response({"status": "error", "message": "invalid signature"}, status=401)
+        backend, payload, error = self._read_signed_payload("Webhook addresses", "sync_addresses")
+        if error:
+            return error
 
         res = backend.sudo()._apply_webhook_address(payload)
         backend._log(
@@ -133,6 +67,55 @@ class PrestashopWebhookController(http.Controller):
             details=f"path={request.httprequest.path} action={payload.get('action', 'unknown')}",
         )
         return request.make_json_response(res or {"status": "ok"})
+
+    def _read_signed_payload(self, label, operation):
+        """Parse the JSON body of a webhook and check its HMAC-SHA256 signature.
+
+        Returns (backend, payload, None) when the request is a valid signed POST,
+        otherwise (None, None, response) with the response to send back.
+        """
+        def refuse(body, status=200):
+            return None, None, request.make_json_response(body, status=status)
+
+        _logger.info(
+            "%s hit: method=%s path=%s",
+            label,
+            request.httprequest.method,
+            request.httprequest.path,
+        )
+        if request.httprequest.method != "POST":
+            return refuse({"status": "ok", "message": "use POST"})
+        body = request.httprequest.data or b""
+        if not body:
+            return refuse({"status": "error", "message": "empty body"}, 400)
+
+        signature = request.httprequest.headers.get("X-Prestashop-Signature", "")
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except Exception:
+            return refuse({"status": "error", "message": "invalid json"}, 400)
+
+        backend = self._find_backend(payload)
+        if not backend or not backend.webhook_secret:
+            _logger.warning("%s: backend not found. payload=%s", label, payload)
+            return refuse({"status": "error", "message": "backend not found"}, 400)
+
+        expected = hmac.new(
+            backend.webhook_secret.encode("utf-8"),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+
+        if not hmac.compare_digest(expected, signature):
+            backend._log(
+                operation,
+                "warning",
+                f"{label}: invalid signature",
+                details=f"path={request.httprequest.path}",
+            )
+            return refuse({"status": "error", "message": "invalid signature"}, 401)
+
+        return backend, payload, None
 
     def _find_backend(self, payload):
         Backend = request.env["prestashop.backend"].sudo()
@@ -148,24 +131,18 @@ class PrestashopWebhookController(http.Controller):
         if not candidates:
             return None
 
-        shop_url = (payload.get("shop_url") or "").strip()
-        host = ""
-        if shop_url:
-            try:
-                parsed = urlparse(shop_url)
-                host = (parsed.netloc or "").split(":")[0].strip().lower()
-            except Exception:
-                host = ""
-
+        host = self._host(payload.get("shop_url"))
         if host:
             for backend in candidates:
-                bhost = ""
-                try:
-                    parsed = urlparse((backend.base_url or "").strip())
-                    bhost = (parsed.netloc or "").split(":")[0].strip().lower()
-                except Exception:
-                    bhost = ""
-                if bhost and bhost == host:
+                if self._host(backend.base_url) == host:
                     return backend
 
         return None
+
+    @staticmethod
+    def _host(url):
+        """Lowercased hostname of a URL, without port; '' when it cannot be parsed."""
+        try:
+            return (urlparse((url or "").strip()).netloc or "").split(":")[0].strip().lower()
+        except Exception:
+            return ""

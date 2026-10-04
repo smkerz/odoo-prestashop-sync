@@ -7,6 +7,8 @@ from odoo import http
 from odoo.http import request
 from odoo.addons.mass_mailing.controllers.main import MassMailController
 
+from ..models.mailing_contact_extend import _push_opt_outs_to_all_backends
+
 _logger = logging.getLogger(__name__)
 
 
@@ -36,22 +38,7 @@ class MassMailControllerPrestashop(MassMailController):
                 registry = odoo.registry(db_name)
                 with registry.cursor() as cr:
                     env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
-                    backends = env["prestashop.backend"].search([
-                        ("api_key", "!=", False),
-                    ])
-                    for backend in backends:
-                        try:
-                            client = backend._client()
-                            backend._push_opt_outs_to_prestashop(client)
-                            _logger.info(
-                                "Pushed opt-outs to PrestaShop backend %s after email unsubscribe",
-                                backend.name,
-                            )
-                        except Exception as e:
-                            _logger.warning(
-                                "Failed to push opt-out to PrestaShop backend %s: %s",
-                                backend.name, e,
-                            )
+                    _push_opt_outs_to_all_backends(env)
             except Exception as e:
                 _logger.warning("Failed to trigger async PrestaShop opt-out push: %s", e)
 
