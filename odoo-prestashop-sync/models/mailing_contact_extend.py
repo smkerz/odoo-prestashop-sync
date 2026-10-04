@@ -6,7 +6,8 @@ PrestaShop backends. This avoids waiting for the cron.
 
 Note: the native Odoo unsubscribe link (/mailing/confirm_unsubscribe) writes
 directly on the subscription record without going through mailing.contact.write.
-That path is covered by the cron (recommended: 15 min interval).
+That path is covered by controllers/mailing_unsubscribe_hook.py, with the cron
+as fallback.
 """
 
 import logging

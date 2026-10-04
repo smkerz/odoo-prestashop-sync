@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from odoo import SUPERUSER_ID, api, fields, models, _
 from odoo.exceptions import UserError
 
-from .prestashop_client import PrestaShopClient, PrestaShopAPIError
+from .prestashop_client import PrestaShopClient, PrestaShopAPIError, USER_AGENT
 import requests
 
 _logger = logging.getLogger(__name__)
@@ -396,6 +396,7 @@ class PrestashopBackend(models.Model):
         try:
             config_resp = requests.get(
                 prestashop_config_url,
+                headers={"User-Agent": USER_AGENT},
                 timeout=self.timeout or 30,
                 verify=bool(self.verify_tls),
             )
@@ -464,6 +465,7 @@ class PrestashopBackend(models.Model):
         try:
             test_resp = requests.post(
                 prestashop_test_url,
+                headers={"User-Agent": USER_AGENT},
                 timeout=self.timeout or 30,
                 verify=bool(self.verify_tls),
             )
@@ -721,6 +723,10 @@ class PrestashopBackend(models.Model):
           opted-out (mailing.contact.opt_out=True) or globally blacklisted (mail.blacklist).
         - We do remove them from the lists if Presta says they should not be subscribed.
         - We also respect per-list unsubscription in Odoo (the "Désinscription" checkbox on a list line).
+
+        Email-only subscribers (ps_emailsubscription, no customer account) follow the Newsletter list:
+        active rows are subscribed, rows deactivated in PrestaShop (active=0) are opted out.
+        Rows deleted from PrestaShop are left untouched.
         """
         self.ensure_one()
 
@@ -811,16 +817,24 @@ class PrestashopBackend(models.Model):
         # These are visitors who subscribed via the newsletter footer block
         # without creating a customer account.
         desired_news_emails = set()  # emails (not partner IDs) for email-only subs
+        # Rows explicitly deactivated in PS (active=0). Unlike rows that merely
+        # vanished, this is a positive signal, so it is safe to act on.
+        deactivated_news_emails = set()
         try:
-            email_only_subs = client.list_email_only_subscribers()
-            for sub in email_only_subs:
+            active_emails, inactive_emails = set(), set()
+            for sub in client.list_email_only_subscribers(active_only=False):
                 sub_email = self._norm_email(sub.get("email"))
-                if sub_email and sub_email not in p_by_email:
-                    p_by_email[sub_email] = None  # No partner for these
-                    desired_news_emails.add(sub_email)
-            if email_only_subs:
+                if sub_email:
+                    (active_emails if str(sub.get("active")) == "1" else inactive_emails).add(sub_email)
+            # Customer consent is governed by the customer flag, never by this
+            # table, so emails of mapped partners are left out of both sets.
+            deactivated_news_emails = inactive_emails - active_emails - set(p_by_email)
+            desired_news_emails = active_emails - set(p_by_email)
+            for sub_email in desired_news_emails:
+                p_by_email[sub_email] = None  # No partner for these
+            if active_emails:
                 self._log("sync_email_marketing", "ok",
-                          f"Found {len(email_only_subs)} email-only subscribers from ps_emailsubscription")
+                          f"Found {len(active_emails)} email-only subscribers from ps_emailsubscription")
         except Exception as e:
             self._log("sync_email_marketing", "warning",
                       "Failed to fetch email-only subscribers", details=str(e))
@@ -927,10 +941,29 @@ class PrestashopBackend(models.Model):
                 "list_opt_out_skipped": list_opt_out_skipped,
             }
 
+        def opt_out_deactivated_email_only():
+            """Opt out of the Newsletter list the email-only subs deactivated in PS."""
+            if not deactivated_news_emails or not sub_field_name:
+                return 0
+            contacts = MailingContact.search([("email_normalized", "in", list(deactivated_news_emails))])
+            Subscription = self.env[MailingContact._fields[sub_field_name].comodel_name].sudo()
+            subs = Subscription.search([
+                ("contact_id", "in", contacts.ids),
+                ("list_id", "=", list_news.id),
+                ("opt_out", "=", False),
+            ])
+            if subs and not preview:
+                subs.write({"opt_out": True})
+                self._log("sync_email_marketing", "ok",
+                          f"Opted out {len(subs)} email-only subscribers deactivated in PrestaShop")
+            return len(subs)
+
         empty_result = {"subscribe": 0, "unsubscribe": 0, "skipped": 0,
                         "opt_out_skipped": 0, "list_opt_out_skipped": 0, "aborted": True}
+        res_news = sync_one_list(list_news, desired_news, desired_news_emails) if news_ok else dict(empty_result)
+        res_news["email_only_deactivated"] = opt_out_deactivated_email_only()
         return {
-            "newsletter": sync_one_list(list_news, desired_news, desired_news_emails) if news_ok else dict(empty_result),
+            "newsletter": res_news,
             "offers": sync_one_list(list_offers, desired_offers) if offers_ok else dict(empty_result),
         }
 
@@ -1313,6 +1346,9 @@ class PrestashopBackend(models.Model):
         - If contact is unsubscribed from the Partner Offers list -> optin=0
 
         Matching key: email (via imported partner).
+
+        Email-only subscribers (ps_emailsubscription) are deactivated through the
+        prestashopodoo module endpoint when blacklisted or unsubscribed in Odoo.
         """
         self.ensure_one()
 
@@ -1512,6 +1548,7 @@ class PrestashopBackend(models.Model):
                 res = backend._sync_email_marketing_lists(client=client, preview=True)
                 msg = (
                     f"Preview: Newsletter subscribe={res['newsletter']['subscribe']}, unsubscribe={res['newsletter']['unsubscribe']}, "
+                    f"email_only_deactivated={res['newsletter'].get('email_only_deactivated', 0)}, "
                     f"opt_out_skipped={res['newsletter']['opt_out_skipped']}, list_opt_out_skipped={res['newsletter'].get('list_opt_out_skipped', 0)} | "
                     f"Offers subscribe={res['offers']['subscribe']}, unsubscribe={res['offers']['unsubscribe']}, "
                     f"opt_out_skipped={res['offers']['opt_out_skipped']}, list_opt_out_skipped={res['offers'].get('list_opt_out_skipped', 0)}"
@@ -1534,7 +1571,8 @@ class PrestashopBackend(models.Model):
                 backend.last_consents_sync = fields.Datetime.now()
                 dur = time.perf_counter() - start
                 msg = (
-                    f"Consents synced. Newsletter subscribe={res['newsletter']['subscribe']}, unsubscribe={res['newsletter']['unsubscribe']} "
+                    f"Consents synced. Newsletter subscribe={res['newsletter']['subscribe']}, unsubscribe={res['newsletter']['unsubscribe']}, "
+                    f"email_only_deactivated={res['newsletter'].get('email_only_deactivated', 0)} "
                     f"(opt_out_skipped={res['newsletter']['opt_out_skipped']}, list_opt_out_skipped={res['newsletter'].get('list_opt_out_skipped', 0)}) | "
                     f"Offers subscribe={res['offers']['subscribe']}, unsubscribe={res['offers']['unsubscribe']} "
                     f"(opt_out_skipped={res['offers']['opt_out_skipped']}, list_opt_out_skipped={res['offers'].get('list_opt_out_skipped', 0)})"

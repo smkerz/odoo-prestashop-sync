@@ -24,6 +24,7 @@ Syncs customers, addresses, and marketing consents (newsletter / partner offers)
 - Creates one mailing list per site: "Newsletter (hostname)" and "Partner Offers (hostname)"
 - Applies tags on contacts (newsletter / partner offers)
 - Respects `respect_odoo_opt_out`: never re-subscribes a contact who opted out in Odoo
+- Email-only subscribers (newsletter block, no customer account) are synced through the companion PrestaShop module: active rows are subscribed, rows deactivated in PrestaShop are opted out, deleted rows are left untouched
 
 **Odoo → PrestaShop (revocation-only):**
 - When a contact is opted out of a mailing list → pushes `newsletter=0` to PrestaShop
