@@ -1,3 +1,4 @@
+from . import consent_rules
 from . import prestashop_client
 from . import prestashop_backend
 from . import prestashop_mappings

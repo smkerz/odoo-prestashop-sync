@@ -32,6 +32,8 @@ Syncs customers, addresses, and marketing consents (newsletter / partner offers)
 - Real-time push on manual opt-out and email blacklist (via model hooks)
 - Async push on email unsubscribe link click (via controller hook, no page delay)
 - Cron as fallback (recommended: every 15 minutes)
+- Only on an explicit signal: an opted-out list subscription or a blacklisted email. A contact merely absent from an Odoo list is never unsubscribed in PrestaShop
+- Automatic pushes are capped (`opt_out_push_max_per_run`, 25 by default): above the cap nothing is sent and an error is logged. "Preview" shows the volume, the "Odoo → Presta" button applies it without cap
 
 **Important:** Odoo → PrestaShop is **revocation-only**. Odoo never pushes `newsletter=1` or `optin=1` to PrestaShop.
 

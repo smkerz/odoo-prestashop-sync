@@ -11,6 +11,7 @@ from odoo import SUPERUSER_ID, api, fields, models, _
 from odoo.exceptions import UserError
 
 from .prestashop_client import PrestaShopClient, PrestaShopAPIError, USER_AGENT
+from . import consent_rules
 import requests
 
 _logger = logging.getLogger(__name__)
@@ -200,6 +201,14 @@ class PrestashopBackend(models.Model):
         string="Respect Odoo opt-out",
         default=True,
         help="If enabled, recipients who opted out in Odoo will never be re-subscribed automatically."
+    )
+
+    opt_out_push_max_per_run = fields.Integer(
+        string="Max revocations per automatic push",
+        default=25,
+        help="Safety limit for the automatic Odoo -> PrestaShop push (cron and real-time hooks): "
+             "if more consents than this would be revoked in one run, nothing is sent and an error is logged. "
+             "The 'Odoo → Presta' button is not limited. 0 = no limit.",
     )
 
     include_guest_customers = fields.Boolean(
@@ -1314,203 +1323,139 @@ class PrestashopBackend(models.Model):
         self._log("sync_addresses", "warning", f"Webhook address: unknown action={action}")
         return {"status": "error", "message": f"unknown action: {action}"}
 
-    def _push_opt_outs_to_prestashop(self, client):
+    def _opted_out_emails(self, list_rec, emails):
+        """Return the normalized emails explicitly opted out of a mailing list."""
+        MailingContact = self.env["mailing.contact"].sudo()
+        fname = self._discover_subscription_field(MailingContact)
+        if not fname or not emails:
+            return set()
+        Subscription = self.env[MailingContact._fields[fname].comodel_name].sudo()
+        subs = Subscription.search([
+            ("list_id", "=", list_rec.id),
+            ("opt_out", "=", True),
+            ("contact_id.email_normalized", "in", list(emails)),
+        ])
+        return {self._norm_email(sub.contact_id.email_normalized) for sub in subs}
+
+    def _push_opt_outs_to_prestashop(self, client, preview=False, enforce_cap=True):
         """Push Odoo-side consent revocations to PrestaShop.
 
-        Rules (revocation-only, never re-subscribe):
-        - If Odoo Email Marketing contact has opt_out=True -> newsletter=0 and optin=0 in PrestaShop
-        - If the email is globally blacklisted in Odoo (mail.blacklist) -> newsletter=0 and optin=0
-        - If contact is unsubscribed from the Newsletter list -> newsletter=0
-        - If contact is unsubscribed from the Partner Offers list -> optin=0
-
-        Matching key: email (via imported partner).
+        Revocation-only, and only on a positive signal (see consent_rules):
+        - email blacklisted in Odoo (mail.blacklist) -> newsletter=0 and optin=0
+        - subscription to the Newsletter list opted out -> newsletter=0
+        - subscription to the Partner Offers list opted out -> optin=0
+        A contact merely absent from an Odoo list is never unsubscribed, and nothing
+        is sent for a consent PrestaShop already has at 0.
 
         Email-only subscribers (ps_emailsubscription) are deactivated through the
-        prestashopodoo module endpoint when blacklisted or unsubscribed in Odoo.
+        prestashopodoo module endpoint under the same rules.
+
+        preview: compute the plan without calling PrestaShop.
+        enforce_cap: refuse to apply more than opt_out_push_max_per_run revocations
+        (automatic runs); the manual button passes False.
+
+        Returns a dict: customers / email_only (planned revocations), updated /
+        email_only_unsub (applied), errors, aborted.
         """
         self.ensure_one()
+        operation = "sync_consents_odoo_to_prestashop"
+        stats = {"customers": 0, "email_only": 0, "updated": 0, "email_only_unsub": 0, "errors": 0, "aborted": False}
 
-        try:
-            MailingContact = self.env["mailing.contact"].sudo()
-        except KeyError:
+        if "mailing.contact" not in self.env:
             raise UserError(_("Email Marketing (mass_mailing) is not installed."))
 
         maps = self.env["prestashop.customer.map"].sudo().search([("backend_id", "=", self.id)])
-        if not maps:
-            return 0, 0
-
-        list_news = self._ensure_mailing_list("newsletter")
-        list_offers = self._ensure_mailing_list("offers")
-
-        # Build PrestaShop ID -> email mapping
-        presta_to_email = {}
-        email_to_customer_ids = {}
+        customer_emails = {}
         for m in maps:
             email = self._norm_email(m.partner_id.email)
-            if not email:
-                continue
-            presta_to_email[str(m.prestashop_id)] = email
-            email_to_customer_ids.setdefault(email, set()).add(m.prestashop_id)
+            if email:
+                customer_emails[str(m.prestashop_id)] = email
 
-        emails = list(email_to_customer_ids.keys())
-        if not emails:
-            return 0, 0
-
-        # Fetch current PrestaShop state: which customers have newsletter=1 / optin=1
+        # Current PrestaShop state. A failed fetch leaves the set empty, so nothing
+        # is pushed for that consent in this run.
         presta_news_ids = set()
         presta_offers_ids = set()
-        try:
-            presta_news_ids = set(client.list_newsletter_customer_ids(
+        if customer_emails:
+            fetch_args = dict(
                 batch_size=int(self.customer_batch_size or 200),
                 include_guests=bool(self.include_guest_customers),
                 max_total=int(self.customer_max_per_run or 5000),
-            ))
-        except Exception as e:
-            self._log("sync_consents_odoo_to_prestashop", "warning",
-                      "Failed to fetch newsletter subscribers from PrestaShop", details=str(e))
-        try:
-            presta_offers_ids = set(client.list_optin_customer_ids(
-                batch_size=int(self.customer_batch_size or 200),
-                include_guests=bool(self.include_guest_customers),
-                max_total=int(self.customer_max_per_run or 5000),
-            ))
-        except Exception as e:
-            self._log("sync_consents_odoo_to_prestashop", "warning",
-                      "Failed to fetch optin subscribers from PrestaShop", details=str(e))
+            )
+            try:
+                presta_news_ids = set(client.list_newsletter_customer_ids(**fetch_args))
+            except Exception as e:
+                self._log(operation, "warning", "Failed to fetch newsletter subscribers from PrestaShop", details=str(e))
+            try:
+                presta_offers_ids = set(client.list_optin_customer_ids(**fetch_args))
+            except Exception as e:
+                self._log(operation, "warning", "Failed to fetch optin subscribers from PrestaShop", details=str(e))
 
-        # Emails that PrestaShop considers subscribed
-        presta_news_emails = {presta_to_email[i] for i in presta_news_ids if i in presta_to_email}
-        presta_offers_emails = {presta_to_email[i] for i in presta_offers_ids if i in presta_to_email}
-
-        # Fetch mailing contacts
-        mc = MailingContact.search([("email", "in", emails)])
-        mc_by_email = {self._norm_email(x.email): x for x in mc if x.email}
-        for e in [x for x in emails if x not in mc_by_email]:
-            x = MailingContact.search([("email", "=ilike", e)], limit=1)
-            if x and x.email:
-                mc_by_email[self._norm_email(x.email)] = x
-
-        def _is_subscribed(mc_rec, list_rec):
-            """Check if contact is actively subscribed (in list AND not opted out)."""
-            if list_rec not in mc_rec.list_ids:
-                return False
-            sub = self._list_subscription(mc_rec, list_rec)
-            return not (sub is not None and getattr(sub, "opt_out", False))
-
-        # Odoo list membership: emails actively subscribed to each list
-        odoo_news_emails = set()
-        odoo_offers_emails = set()
-        for email, mc_rec in mc_by_email.items():
-            if _is_subscribed(mc_rec, list_news):
-                odoo_news_emails.add(email)
-            if _is_subscribed(mc_rec, list_offers):
-                odoo_offers_emails.add(email)
-
-        blacklisted_emails = self._blacklisted_emails(emails)
-
-        updated = 0
-        errors = 0
-        updated_blacklist = 0
-        updated_unsub_news = 0
-        updated_unsub_offers = 0
-
-        for email, customer_ids in email_to_customer_ids.items():
-            do_newsletter = None
-            do_optin = None
-
-            if email in blacklisted_emails:
-                do_newsletter = 0
-                do_optin = 0
-                updated_blacklist += 1
-            else:
-                # Only push newsletter=0 if PrestaShop says subscribed BUT Odoo says not in list
-                if email in presta_news_emails and email not in odoo_news_emails:
-                    do_newsletter = 0
-                    updated_unsub_news += 1
-                if email in presta_offers_emails and email not in odoo_offers_emails:
-                    do_optin = 0
-                    updated_unsub_offers += 1
-
-            if do_newsletter is None and do_optin is None:
-                continue
-
-            for cid in customer_ids:
-                try:
-                    client.update_customer_consents(str(cid), newsletter=do_newsletter, optin=do_optin)
-                    updated += 1
-                except Exception as e:
-                    errors += 1
-                    self._log(
-                        "sync_consents_odoo_to_prestashop",
-                        "error",
-                        "Failed to sync consents to PrestaShop.",
-                        details=str(e),
-                        prestashop_id=str(cid),
-                    )
-
-        # === Email-only subscribers (no customer account on PS) ===
-        # The loop above only touches mapped customers. Email-only subs live in
-        # ps_emailsubscription and need a separate POST to the module endpoint
-        # to be deactivated. Two reasons to deactivate:
-        #   1. Email is in mail.blacklist (Stop reply, admin action)
-        #   2. Email has a mailing.contact in Odoo and is no longer subscribed
-        #      to the Newsletter list there (unsubscribe link click)
-        email_only_unsub = 0
-        try:
-            email_only_subs = client.list_email_only_subscribers()
-        except Exception as e:
-            email_only_subs = []
-            self._log("sync_consents_odoo_to_prestashop", "warning",
-                      "Failed to fetch email-only subs for opt-out push", details=str(e))
-
-        eo_active_emails = {
-            self._norm_email(s.get("email"))
-            for s in email_only_subs
-            if s.get("active") in ("1", 1) and s.get("email")
+        # Email-only subscribers live in ps_emailsubscription (no customer account).
+        email_only_active = {
+            self._norm_email(sub.get("email"))
+            for sub in client.list_email_only_subscribers()
+            if sub.get("email")
         }
-        if eo_active_emails:
-            eo_emails_list = list(eo_active_emails)
-            eo_blacklisted = self._blacklisted_emails(eo_emails_list)
 
-            eo_to_unsub = set(eo_blacklisted)
+        emails = set(customer_emails.values()) | email_only_active
+        if not emails:
+            return stats
 
-            # Also detect email-only with a mailing.contact opt'd out of the news list
-            eo_mc = MailingContact.search([("email", "in", eo_emails_list)])
-            for mc_rec in eo_mc:
-                em = self._norm_email(mc_rec.email)
-                if not em or em not in eo_active_emails:
-                    continue
-                if not _is_subscribed(mc_rec, list_news):
-                    eo_to_unsub.add(em)
+        revoked_news = self._opted_out_emails(self._ensure_mailing_list("newsletter"), emails)
+        revoked_offers = self._opted_out_emails(self._ensure_mailing_list("offers"), emails)
+        blacklisted = self._blacklisted_emails(list(emails))
 
-            for em in eo_to_unsub:
-                result = client.unsubscribe_email_only_subscriber(em)
-                if result and result.get("status") == "ok":
-                    email_only_unsub += int(result.get("updated") or 0)
-                elif result and result.get("status") == "noop":
-                    # Already inactive — fine
-                    pass
-                else:
-                    errors += 1
-                    self._log(
-                        "sync_consents_odoo_to_prestashop",
-                        "error",
-                        "Failed to unsubscribe email-only subscriber.",
-                        details=f"email={em} result={result!r}",
-                    )
+        customer_plan = consent_rules.plan_customer_revocations(
+            customer_emails, presta_news_ids, presta_offers_ids, revoked_news, revoked_offers, blacklisted)
+        email_only_plan = consent_rules.plan_email_only_revocations(email_only_active, revoked_news, blacklisted)
+        stats["customers"] = len(customer_plan)
+        stats["email_only"] = len(email_only_plan)
+        total = consent_rules.count_revocations(customer_plan, email_only_plan)
+
+        if preview or not total:
+            return stats
+
+        cap = int(self.opt_out_push_max_per_run or 0)
+        if enforce_cap and consent_rules.exceeds_cap(total, cap):
+            stats["aborted"] = True
+            self._log(
+                operation, "error",
+                f"Odoo->PrestaShop push aborted: {total} revocations exceed the limit of {cap} per automatic run.",
+                details="Check the volume with the Preview button, then apply with the 'Odoo → Presta' button "
+                        f"(not limited). customers={len(customer_plan)}; email_only={len(email_only_plan)}",
+            )
+            return stats
+
+        for customer_id, (newsletter, optin) in customer_plan.items():
+            try:
+                client.update_customer_consents(customer_id, newsletter=newsletter, optin=optin)
+                stats["updated"] += 1
+            except Exception as e:
+                stats["errors"] += 1
+                self._log(operation, "error", "Failed to sync consents to PrestaShop.",
+                          details=str(e), prestashop_id=customer_id)
+
+        for email in email_only_plan:
+            result = client.unsubscribe_email_only_subscriber(email)
+            if result and result.get("status") == "ok":
+                stats["email_only_unsub"] += 1
+            elif result and result.get("status") == "noop":
+                # Already inactive — fine
+                pass
+            else:
+                stats["errors"] += 1
+                self._log(operation, "error", "Failed to unsubscribe email-only subscriber.",
+                          details=f"email={email} result={result!r}")
 
         self._log(
-            "sync_consents_odoo_to_prestashop",
-            "ok" if errors == 0 else "warning",
+            operation,
+            "ok" if stats["errors"] == 0 else "warning",
             (
-                f"Odoo->PrestaShop consents sync done. updated_customers={updated}; errors={errors}; "
-                f"blacklisted_emails={updated_blacklist}; "
-                f"unsub_news_emails={updated_unsub_news}; unsub_offers_emails={updated_unsub_offers}; "
-                f"email_only_unsub={email_only_unsub}"
+                f"Odoo->PrestaShop consents sync done. updated_customers={stats['updated']}; "
+                f"email_only_unsub={stats['email_only_unsub']}; errors={stats['errors']}"
             ),
         )
-
-        return updated, errors
+        return stats
 
     def action_preview_consents(self):
         for backend in self:
@@ -1524,6 +1469,8 @@ class PrestashopBackend(models.Model):
                     f"Offers subscribe={res['offers']['subscribe']}, unsubscribe={res['offers']['unsubscribe']}, "
                     f"opt_out_skipped={res['offers']['opt_out_skipped']}, list_opt_out_skipped={res['offers'].get('list_opt_out_skipped', 0)}"
                 )
+                push = backend._push_opt_outs_to_prestashop(client, preview=True)
+                msg += f" | Odoo → Presta would revoke: customers={push['customers']}, email_only={push['email_only']}"
                 backend._log("preview_consents", "ok", msg)
                 return msg
             msg = backend._run_locked("preview_consents", run)
@@ -1559,8 +1506,11 @@ class PrestashopBackend(models.Model):
         for backend in self:
             def run():
                 client = backend._client()
-                done, errors = backend._push_opt_outs_to_prestashop(client)
-                return f"Consents synced to PrestaShop: updated={done}, errors={errors}"
+                stats = backend._push_opt_outs_to_prestashop(client, enforce_cap=False)
+                return (
+                    f"Consents synced to PrestaShop: updated={stats['updated']}, "
+                    f"email_only_unsub={stats['email_only_unsub']}, errors={stats['errors']}"
+                )
             msg = backend._run_locked("sync_consents_odoo_to_prestashop", run)
 
         return self._notification(msg)

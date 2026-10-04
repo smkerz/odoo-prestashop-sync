@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<odoo>
+<odoo noupdate="1">
     <!--
         Scheduled actions are shipped INACTIVE by default.
         Activate them manually when you are ready (Settings > Technical > Automation > Scheduled Actions).
+        noupdate: a module update must not reset their active state and interval.
     -->
 
     <record id="ir_cron_prestashop_import_customers" model="ir.cron">
