@@ -1,0 +1,154 @@
+<section class="container">
+    <h1>Connecteur PrestaShop (Basic)</h1>
+    <p class="lead">
+        Synchronise les clients, les adresses et les consentements marketing
+        (newsletter, offres partenaires) entre PrestaShop 1.7+ et Odoo 17.
+    </p>
+    <p>
+        Chaque boutique PrestaShop est déclarée comme un <strong>backend</strong>, avec ses propres
+        étiquettes, listes de diffusion, correspondances et journaux.
+    </p>
+</section>
+
+<section class="container">
+    <h2>Ce que fait le module</h2>
+
+    <h3>Clients</h3>
+    <ul>
+        <li>Import incrémental par numéro de client PrestaShop : un client déjà importé n'est pas réimporté.</li>
+        <li>Rapprochement par e-mail quand la correspondance est absente, y compris avec un contact archivé.</li>
+        <li>Comptes invités inclus ou non, au choix.</li>
+        <li>Étiquettes posées sur le contact : « Client Prestashop » et une étiquette par boutique (« PS: boutique.exemple.com »).</li>
+        <li>Réimport d'un client précis par son numéro PrestaShop.</li>
+    </ul>
+
+    <h3>Adresses</h3>
+    <ul>
+        <li>Importées comme contacts enfants de type « Livraison » sous le client.</li>
+        <li>Pas de doublon : une adresse identique déjà présente est reliée au lieu d'être recréée.</li>
+        <li>Création, modification et suppression en temps réel par webhook.</li>
+        <li>Balayage complet hebdomadaire en filet de sécurité.</li>
+    </ul>
+
+    <h3>Consentements marketing</h3>
+    <p><strong>PrestaShop → Odoo</strong></p>
+    <ul>
+        <li>Deux listes de diffusion par boutique : « Newsletter Prestashop - boutique » et « Offres partenaires Prestashop - boutique ».</li>
+        <li>Les clients sont inscrits ou désinscrits selon leurs cases « newsletter » et « offres partenaires » dans PrestaShop.</li>
+        <li>Les inscrits du bloc newsletter (e-mail seul, sans compte client) suivent la liste Newsletter :
+            inscrits tant que la ligne est active dans PrestaShop, désinscrits quand elle y est désactivée.</li>
+        <li>Un contact désinscrit ou mis en liste noire dans Odoo n'est jamais réinscrit par la synchronisation.</li>
+        <li>Si l'API PrestaShop ne répond pas, la synchronisation est abandonnée : aucune désinscription en masse par erreur.</li>
+    </ul>
+    <p><strong>Odoo → PrestaShop (révocation uniquement)</strong></p>
+    <ul>
+        <li>Une désinscription d'une liste dans Odoo retire le consentement correspondant dans PrestaShop.</li>
+        <li>Une adresse mise en liste noire perd ses deux consentements, sur toutes les boutiques.</li>
+        <li>Envoi immédiat lors d'une désinscription manuelle, d'une mise en liste noire ou d'un clic sur le lien de désinscription d'un e-mail ; une tâche planifiée sert de rattrapage.</li>
+    </ul>
+    <div class="alert alert-info" role="alert">
+        Odoo n'inscrit jamais personne dans PrestaShop : il ne fait qu'y retirer des consentements.
+    </div>
+</section>
+
+<section class="container">
+    <h2>Prérequis</h2>
+    <ul>
+        <li>Odoo 17 (Community ou Enterprise), avec les modules Ventes, Stock, Contacts et E-mail Marketing.</li>
+        <li>PrestaShop 1.7 ou plus récent.</li>
+        <li>Le module PrestaShop <code>prestashopodoo</code> pour le temps réel et les inscrits du bloc newsletter.
+            Sans lui, seuls les clients, les adresses et les consentements des comptes clients sont synchronisés, par tâches planifiées.</li>
+    </ul>
+</section>
+
+<section class="container">
+    <h2>Mise en place</h2>
+
+    <h3>1. Dans PrestaShop</h3>
+    <p>Activer le Webservice (Paramètres avancés &gt; Webservice) et créer une clé avec ces droits :</p>
+    <table class="table table-bordered">
+        <thead>
+            <tr><th>Droit</th><th>Ressources</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Lecture (GET)</td><td>customers, addresses, countries, states, languages</td></tr>
+            <tr><td>Modification (PUT)</td><td>customers</td></tr>
+        </tbody>
+    </table>
+    <p>
+        Installer le module <code>prestashopodoo</code>, puis y renseigner l'URL de base du webhook Odoo
+        (<code>https://odoo.exemple.com/prestashop/webhook</code>), le secret partagé et le numéro du backend Odoo.
+    </p>
+
+    <h3>2. Dans Odoo</h3>
+    <p>Vérifier que le paramètre système <code>web.base.url</code> pointe vers Odoo, <strong>sans barre oblique finale</strong>
+        (sinon les liens de désinscription des e-mails sont cassés).</p>
+    <p>Créer un backend dans <em>PrestaShop Connector &gt; Configuration &gt; Backends</em> :</p>
+    <table class="table table-bordered">
+        <thead>
+            <tr><th>Champ</th><th>Valeur</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Name</td><td>Le nom de la boutique</td></tr>
+            <tr><td>Base URL</td><td>L'adresse de la boutique, par exemple <code>https://boutique.exemple.com</code></td></tr>
+            <tr><td>API Key</td><td>La clé Webservice créée dans PrestaShop</td></tr>
+            <tr><td>Webhook Secret</td><td>Le secret partagé, identique à celui saisi dans le module PrestaShop</td></tr>
+        </tbody>
+    </table>
+
+    <h3>3. Vérifier</h3>
+    <table class="table table-bordered">
+        <thead>
+            <tr><th>Bouton</th><th>Effet</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Test</td><td>Vérifie l'accès à l'API PrestaShop.</td></tr>
+            <tr><td>Webhook</td><td>Vérifie la liaison complète dans les deux sens : configuration du module PrestaShop, secret, envoi d'un webhook de test.</td></tr>
+            <tr><td>Preview</td><td>Calcule ce que ferait la synchronisation des consentements, sans rien modifier.</td></tr>
+            <tr><td>Import, Adresses, Presta → Odoo, Odoo → Presta</td><td>Lancent chaque synchronisation à la main.</td></tr>
+        </tbody>
+    </table>
+</section>
+
+<section class="container">
+    <h2>Tâches planifiées</h2>
+    <p>Toutes sont <strong>inactives à l'installation</strong>. Le bouton « Crons » du backend ouvre leur liste.</p>
+    <table class="table table-bordered">
+        <thead>
+            <tr><th>Tâche</th><th>Fréquence par défaut</th><th>Rôle</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Import Customers</td><td>6 heures</td><td>Importe les nouveaux clients.</td></tr>
+            <tr><td>Sync Consents (Presta → Odoo)</td><td>2 heures</td><td>Met à jour les listes de diffusion.</td></tr>
+            <tr><td>Sync Consents (Odoo → Presta)</td><td>1 heure</td><td>Rattrape les désinscriptions non envoyées en temps réel. 15 minutes est un bon réglage.</td></tr>
+            <tr><td>Full Scan Customer Addresses (Weekly)</td><td>1 semaine</td><td>Resynchronise toutes les adresses.</td></tr>
+            <tr><td>Import Orders</td><td>15 minutes</td><td>Sans effet : l'import des commandes est désactivé.</td></tr>
+        </tbody>
+    </table>
+</section>
+
+<section class="container">
+    <h2>Webhooks reçus</h2>
+    <p>Chaque appel est signé (HMAC-SHA256, en-tête <code>X-Prestashop-Signature</code>) et refusé si la signature ne correspond pas au secret du backend.</p>
+    <table class="table table-bordered">
+        <thead>
+            <tr><th>Adresse</th><th>Rôle</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>POST /prestashop/webhook/consents</code></td><td>Changement de consentement, création de client, inscription au bloc newsletter</td></tr>
+            <tr><td><code>POST /prestashop/webhook/addresses</code></td><td>Création, modification ou suppression d'une adresse</td></tr>
+            <tr><td><code>GET /prestashop/webhook/ping</code></td><td>Test de disponibilité</td></tr>
+        </tbody>
+    </table>
+</section>
+
+<section class="container">
+    <h2>Hors périmètre</h2>
+    <ul>
+        <li>Import des commandes (code présent, fonction désactivée)</li>
+        <li>Synchronisation des produits et du stock</li>
+        <li>Taxes, déclinaisons, retours et remboursements</li>
+        <li>Rapprochement des factures et des paiements</li>
+    </ul>
+    <p>Licence : LGPL-3.</p>
+</section>

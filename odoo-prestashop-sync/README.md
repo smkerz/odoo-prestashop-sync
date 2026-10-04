@@ -9,7 +9,7 @@ Syncs customers, addresses, and marketing consents (newsletter / partner offers)
 - Incremental import by PrestaShop customer ID (no re-import of already synced customers)
 - Deduplication by email (if mapping is lost, the customer is matched by email)
 - Optional: include guest checkout customers (`include_guest_customers`)
-- Per-site tag (e.g. "Client Prestashop — shop.example.com")
+- Tags on the contact: "Client Prestashop" and one per site (e.g. "PS: shop.example.com")
 
 ### Address Sync
 - Imported as child contacts (type "Delivery") under the main customer
@@ -21,7 +21,7 @@ Syncs customers, addresses, and marketing consents (newsletter / partner offers)
 
 **PrestaShop → Odoo:**
 - Syncs `newsletter` and `optin` fields from PrestaShop
-- Creates one mailing list per site: "Newsletter (hostname)" and "Partner Offers (hostname)"
+- Creates two mailing lists per site: "Newsletter Prestashop - hostname" and "Offres partenaires Prestashop - hostname"
 - Applies tags on contacts (newsletter / partner offers)
 - Respects `respect_odoo_opt_out`: never re-subscribes a contact who opted out in Odoo
 - Email-only subscribers (newsletter block, no customer account) are synced through the companion PrestaShop module: active rows are subscribed, rows deactivated in PrestaShop are opted out, deleted rows are left untouched
@@ -92,7 +92,7 @@ In the **Customers** tab of the backend:
 - `include_guest_customers` is checked by default
 
 ### Webhooks (optional, for real-time)
-Requires a PHP module on the PrestaShop side to send webhooks. Without it, use the crons.
+Requires the companion PrestaShop module `prestashopodoo` to send webhooks. Without it, use the crons.
 
 Example curl to test:
 
