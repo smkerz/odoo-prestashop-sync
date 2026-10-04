@@ -1124,7 +1124,10 @@ class PrestashopBackend(models.Model):
                     partner.write({"category_id": [(3, tag.id)]})
 
             update_tag(self.newsletter_tag_id, bool(newsletter))
-            update_tag(self.partner_offers_tag_id, bool(optin))
+            # The newsletter block only speaks about the newsletter: its webhook
+            # carries optin=0 by construction, which is not a revocation.
+            if not email_only:
+                update_tag(self.partner_offers_tag_id, bool(optin))
 
             if newsletter and self.newsletter_revoked_tag_id:
                 partner.write({"category_id": [(3, self.newsletter_revoked_tag_id.id)]})
@@ -1173,7 +1176,8 @@ class PrestashopBackend(models.Model):
             return {"status": "blocked", "message": "opt-out or blacklist"}
 
         set_subscription(list_news, bool(newsletter))
-        set_subscription(list_offers, bool(optin))
+        if not email_only:
+            set_subscription(list_offers, bool(optin))
 
         self._log(
             "sync_consents",

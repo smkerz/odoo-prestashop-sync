@@ -108,12 +108,27 @@ if PHASE == "check":
     check("e2: unsubscribed through the newsletter block -> opted out", opted_out("e2unsub", news))
     check("e3: email-only subscriber on the Newsletter list", subscribed("e3optout", news))
 
+    # --- the real newsletter form ----------------------------------------------
+    check("f1: address subscribed through the form is on the Newsletter list, without partner",
+          subscribed("f1sub", news) and not partner("f1sub"))
+    check("f3: the refused invalid address reached nothing in Odoo",
+          not env["mailing.contact"].search([("email", "=ilike", "e2e-%s-f3bad%%" % TAG)]))
+    check("c8: customer who used the newsletter block is on both lists (optin untouched)",
+          subscribed("c8block", news) and subscribed("c8block", offers),
+          "news=%s offers=%s" % (subscribed("c8block", news), subscribed("c8block", offers)))
+    # The form sends nothing on unsubscription (ps_emailsubscription returns before
+    # its "after" hook): the row is deactivated in the shop and the sync catches it.
+    check("f2: form unsubscription is not known yet, before the sync", subscribed("f2unsub", news))
+
     # --- what only the cron can see -------------------------------------------
     check("e4: still subscribed before the sync (deactivated in the shop without hook)", subscribed("e4deact", news))
     result = backend._sync_email_marketing_lists(client=client, preview=False)
     check("e4: consent sync opts out the row deactivated in the shop",
           opted_out("e4deact", news) and result["newsletter"].get("email_only_deactivated", 0) >= 1,
           "result=%s" % result["newsletter"])
+    check("f2: consent sync opts out the address unsubscribed through the form", opted_out("f2unsub", news))
+    check("c8 and f1: still subscribed after the sync",
+          subscribed("c8block", news) and subscribed("c8block", offers) and subscribed("f1sub", news))
     check("sync leaves the other test contacts as they were",
           subscribed("c1news", news) and subscribed("e1sub", news) and opted_out("c3toggle", news))
 
