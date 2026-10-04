@@ -1,8 +1,9 @@
 """Real-time propagation of Odoo consent revocations to PrestaShop.
 
-When a mailing contact opts out, is removed from a list,
-or an email is blacklisted in Odoo, we immediately push opt-outs to all
-PrestaShop backends. This avoids waiting for the cron.
+When a mailing contact opts out of a list or an email is blacklisted in Odoo,
+we immediately push opt-outs to all PrestaShop backends. This avoids waiting
+for the cron. Removing a contact from a list is not a revocation (see
+consent_rules) and triggers nothing.
 
 Note: the native Odoo unsubscribe link (/mailing/confirm_unsubscribe) writes
 directly on the subscription record without going through mailing.contact.write.
@@ -42,8 +43,6 @@ def _has_opt_out_in_commands(cmds):
         if not isinstance(cmd, (list, tuple)):
             continue
         if cmd[0] == 1 and isinstance(cmd[2], dict) and cmd[2].get("opt_out"):
-            return True
-        if cmd[0] in (2, 3):
             return True
     return False
 
