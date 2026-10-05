@@ -22,11 +22,9 @@ Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 
 | # | Sujet | Ce qu'il faut faire |
 |---|---|---|
-| 8 | Synchro abandonnée marquée « OK » | Quand l'API PrestaShop ne répond pas, la synchro s'arrête sans rien désinscrire, mais le journal affiche « OK » avec des compteurs à zéro. Afficher une erreur claire et alerter (activité ou e-mail). C'est ce qui a masqué une panne de plusieurs jours |
+| 8 | Alerte de synchro : à l'usage | Depuis la 17.0.1.0.84, une synchro abandonnée est journalisée en erreur, affiche une alerte rouge sur le backend et peut envoyer un e-mail (champ « Alert email », au plus un par 24 heures). Renseigner cette adresse sur chaque backend, et vérifier à la première occasion que l'e-mail arrive bien |
 | 9 | Plafond Presta → Odoo | Refuser une synchro qui désinscrirait une part anormale d'une liste en un passage, comme le fait déjà le push Odoo → Presta (`opt_out_push_max_per_run`) |
-| 10 | Comptes en double (erreur 141) | PrestaShop refuse par son API toute modification d'un client dont l'adresse e-mail est aussi celle d'un autre compte. Le push échoue alors à chaque passage pour ces clients. Soit dédoublonner dans la boutique, soit retirer le consentement par un endpoint du module, et ne journaliser l'erreur qu'une fois |
 | 11 | Deux comptes reliés à la même fiche | Quand deux comptes PrestaShop pointent vers le même contact Odoo, l'adresse e-mail du contact suit le dernier compte modifié |
-| 11 bis | Client existant qui crée un compte | Quand le webhook de consentements retrouve le contact par son adresse e-mail (contact déjà présent dans Odoo), il ne crée pas la correspondance avec le compte PrestaShop. Le webhook d'adresse qui suit est alors ignoré (« customer mapping not found »), jusqu'au prochain import clients. Créer la correspondance dès le webhook |
 | 12 | Backend sans client importé | `_sync_email_marketing_lists` sort avant de traiter les inscrits par e-mail seul quand aucun client n'est encore importé |
 | 13 | Plafond de 5 000 sur les listes d'abonnés | `customer_max_per_run` tronque la liste des abonnés lue dans PrestaShop ; au-delà, les suivants seraient désinscrits. Loin des volumes actuels |
 | 14 | Écho des webhooks | Chaque modification faite par Odoo dans PrestaShop revient sous forme de webhook. Sans conséquence, mais c'est du trafic et du bruit dans les logs |

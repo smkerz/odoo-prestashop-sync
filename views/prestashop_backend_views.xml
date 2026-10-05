@@ -8,6 +8,11 @@
                 <header>
                 </header>
                 <sheet>
+                    <div class="alert alert-danger" role="alert" invisible="not sync_alert_message">
+                        <strong>Alerte de synchronisation</strong> depuis le
+                        <field name="sync_alert_date" readonly="1" class="oe_inline"/> :
+                        <field name="sync_alert_message" readonly="1" class="oe_inline"/>
+                    </div>
                     <separator string="Import / Export"/>
                     <!-- Compact, grouped action buttons (boxed for clarity) -->
                     <div class="border rounded-3 p-3 mb-3">
@@ -449,6 +454,7 @@
                                     <field name="last_consents_sync" readonly="1"/>
                                     <field name="respect_odoo_opt_out"/>
                                     <field name="opt_out_push_max_per_run"/>
+                                    <field name="alert_email" widget="email"/>
                                     <field name="include_guest_customers"/>
                                     <separator string="Addresses"/>
                                     <field name="last_address_sync" readonly="1"/>
@@ -475,11 +481,12 @@
         <field name="name">prestashop.backend.tree</field>
         <field name="model">prestashop.backend</field>
         <field name="arch" type="xml">
-            <tree string="PrestaShop Backends">
+            <tree string="PrestaShop Backends" decoration-danger="sync_alert_message">
                 <field name="name"/>
                 <field name="base_url"/>
                 <field name="company_id"/>
-                <field name="last_order_sync"/>
+                <field name="last_consents_sync"/>
+                <field name="sync_alert_message"/>
             </tree>
         </field>
     </record>

@@ -116,6 +116,14 @@ if PHASE == "check":
           subscribed("c8block", news) and subscribed("c8block", offers),
           "news=%s offers=%s" % (subscribed("c8block", news), subscribed("c8block", offers)))
 
+    p = partner("c10dup")
+    maps = env["prestashop.customer.map"].search([("backend_id", "=", backend.id), ("partner_id", "in", p.ids)])
+    check("c10: guest order of a known customer is linked to the same contact",
+          len(p) == 1 and len(maps) == 2, "contacts=%s mappings=%s" % (len(p), len(maps)))
+    kids = env["res.partner"].search([("parent_id", "in", p.ids), ("type", "=", "delivery")])
+    check("c10: address of the guest order is attached to the contact",
+          len(kids) == 1 and kids.city == "Nantes", "addresses=%s cities=%s" % (len(kids), kids.mapped("city")))
+
     # --- what only the cron can see -------------------------------------------
     check("e4: still subscribed before the sync (deactivated in the shop without hook)", subscribed("e4deact", news))
     result = backend._sync_email_marketing_lists(client=client, preview=False)
@@ -133,12 +141,15 @@ if PHASE == "check":
     # this is the path the cron covers.
     subscription("c6optout", news).write({"opt_out": True})
     subscription("e3optout", news).write({"opt_out": True})
+    subscription("c10dup", news).write({"opt_out": True})
     plan = backend._push_opt_outs_to_prestashop(client, preview=True)
     print("push preview: %s" % plan)
-    check("preview announces the two test revocations", plan["customers"] >= 1 and plan["email_only"] >= 1, str(plan))
+    check("preview announces the test revocations (c6, both rows of c10, e3)",
+          plan["customers"] >= 3 and plan["email_only"] >= 1, str(plan))
     stats = backend._push_opt_outs_to_prestashop(client, enforce_cap=False)
     print("push result:  %s" % stats)
-    check("push applied them", stats["updated"] >= 1 and stats["email_only_unsub"] >= 1 and not stats["aborted"], str(stats))
+    check("push applied them, the guest row through the module",
+          stats["updated"] >= 3 and stats["email_only_unsub"] >= 1 and stats["errors"] == 0 and not stats["aborted"], str(stats))
     again = backend._push_opt_outs_to_prestashop(client, preview=True)
     check("nothing is planned twice", again["customers"] <= stats["errors"] and again["email_only"] == 0, str(again))
 
