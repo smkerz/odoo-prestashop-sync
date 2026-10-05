@@ -105,21 +105,16 @@ if PHASE == "check":
 
     check("e1: email-only subscriber on the Newsletter list, without partner",
           subscribed("e1sub", news) and not partner("e1sub"))
-    check("e2: unsubscribed through the newsletter block -> opted out", opted_out("e2unsub", news))
+    # Reported by the prestashopodoo "before" hook (module >= 1.3.2): the shop
+    # deletes the row, so the sync could never see this unsubscription.
+    check("e2: form unsubscription of a visitor is known at once", opted_out("e2unsub", news))
+    check("c9: form unsubscription of a customer is known at once", opted_out("c9unsub", news))
     check("e3: email-only subscriber on the Newsletter list", subscribed("e3optout", news))
-
-    # --- the real newsletter form ----------------------------------------------
-    check("f1: address subscribed through the form is on the Newsletter list, without partner",
-          subscribed("f1sub", news) and not partner("f1sub"))
-    check("f3: the refused invalid address reached nothing in Odoo",
-          not env["mailing.contact"].search([("email", "=ilike", "e2e-%s-f3bad%%" % TAG)]))
+    check("e5: the refused invalid address reached nothing in Odoo",
+          not env["mailing.contact"].search([("email", "=ilike", "e2e-%s-e5bad%%" % TAG)]))
     check("c8: customer who used the newsletter block is on both lists (optin untouched)",
           subscribed("c8block", news) and subscribed("c8block", offers),
           "news=%s offers=%s" % (subscribed("c8block", news), subscribed("c8block", offers)))
-    # Reported by the prestashopodoo "before" hook (module >= 1.3.2): the shop
-    # deletes the row, so the sync could never see this unsubscription.
-    check("f2: form unsubscription of a visitor is known at once", opted_out("f2unsub", news))
-    check("c9: form unsubscription of a customer is known at once", opted_out("c9unsub", news))
 
     # --- what only the cron can see -------------------------------------------
     check("e4: still subscribed before the sync (deactivated in the shop without hook)", subscribed("e4deact", news))
@@ -127,9 +122,9 @@ if PHASE == "check":
     check("e4: consent sync opts out the row deactivated in the shop",
           opted_out("e4deact", news) and result["newsletter"].get("email_only_deactivated", 0) >= 1,
           "result=%s" % result["newsletter"])
-    check("f2 and c9: still opted out after the sync", opted_out("f2unsub", news) and opted_out("c9unsub", news))
-    check("c8 and f1: still subscribed after the sync",
-          subscribed("c8block", news) and subscribed("c8block", offers) and subscribed("f1sub", news))
+    check("e2 and c9: still opted out after the sync", opted_out("e2unsub", news) and opted_out("c9unsub", news))
+    check("c8 and e1: still subscribed after the sync",
+          subscribed("c8block", news) and subscribed("c8block", offers) and subscribed("e1sub", news))
     check("sync leaves the other test contacts as they were",
           subscribed("c1news", news) and subscribed("e1sub", news) and opted_out("c3toggle", news))
 

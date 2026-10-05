@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# local database backups: never commit
+/! Pb Save DB/

@@ -1,74 +1,89 @@
 # TODO
 
-Consolidated roadmap and improvement backlog for the PrestaShop Connector.
-Ordered by priority within each section.
+Liste de travail du connecteur PrestaShop ↔ Odoo et du module PrestaShop `prestashopodoo`.
+Mise à jour le 4 octobre 2026. Aucune donnée personnelle ne doit figurer dans ce fichier.
+
+Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 
 ---
 
-## Code improvements
+## 1. À faire rapidement
 
-### High priority
+| # | Sujet | Ce qu'il faut faire | Qui |
+|---|---|---|---|
+| 0 | Refaire la batterie de tests | Les scripts `tests/e2e` ont été modifiés lors de la passe de propreté (version 17.0.1.0.83) sans être relancés. Mettre à jour l'exemplaire de test, puis rejouer un passage complet sur `dev.mcdavidian.com` et `dev.mcdavidian.fr` avant tout déploiement en production | Exploitation, avec dev |
+| 1 | Cron « Import Orders » | Le désactiver : l'import de commandes est coupé, il tourne pour rien | Exploitation |
+| 2 | Première nuit de crons | Relire les logs du connecteur après la remise en route du 4 octobre | Exploitation, puis dev |
+| 3 | Sauvegardes locales | Sortir du dépôt le dossier de sauvegardes de la base (exclu de git, mais présent dans le dossier de travail) | Exploitation |
+| 4 | Dépôts GitHub | Décider de leur visibilité : ils sont publics et contiennent des fichiers d'adresses | Exploitation |
+| 5 | Clé d'API du `.hair` | La régénérer et la mettre à jour dans le backend Odoo : elle est apparue en clair dans des logs | Exploitation |
+| 6 | Secret webhook | Le changer s'il correspond à la valeur restée dans l'historique du dépôt du module PrestaShop | Exploitation |
+| 7 | Fichiers de données dans le dépôt | Retirer `bounces.csv`, `blacklist_import.csv`, `hard_bounces.txt` et les scripts ponctuels `_*.py`, y compris de l'historique | Dev, après le point 4 |
 
-- [ ] **Sanity cap on mass unsubscribes** — refuse to apply a sync pass that would opt-out more than 5% (or a configurable threshold) of a list's active subscribers in one run. Belt-and-suspenders on top of the `news_ok` / `offers_ok` guards, in case a future bug sidesteps them. Log an error and abort the list's sync. Target: `_sync_email_marketing_lists` in `models/prestashop_backend.py`.
+## 2. Fiabilité du connecteur
 
-- [ ] **Monitoring / alerting on sync errors** — now that the sync aborts gracefully on API failure, operators need to be notified. Add an Odoo activity (or email) when a `sync_email_marketing` log row has `status='error'` with "aborted" in message. Alternative: a dashboard view of recent aborted syncs.
+| # | Sujet | Ce qu'il faut faire |
+|---|---|---|
+| 8 | Synchro abandonnée marquée « OK » | Quand l'API PrestaShop ne répond pas, la synchro s'arrête sans rien désinscrire, mais le journal affiche « OK » avec des compteurs à zéro. Afficher une erreur claire et alerter (activité ou e-mail). C'est ce qui a masqué une panne de plusieurs jours |
+| 9 | Plafond Presta → Odoo | Refuser une synchro qui désinscrirait une part anormale d'une liste en un passage, comme le fait déjà le push Odoo → Presta (`opt_out_push_max_per_run`) |
+| 10 | Comptes en double (erreur 141) | PrestaShop refuse par son API toute modification d'un client dont l'adresse e-mail est aussi celle d'un autre compte. Le push échoue alors à chaque passage pour ces clients. Soit dédoublonner dans la boutique, soit retirer le consentement par un endpoint du module, et ne journaliser l'erreur qu'une fois |
+| 11 | Deux comptes reliés à la même fiche | Quand deux comptes PrestaShop pointent vers le même contact Odoo, l'adresse e-mail du contact suit le dernier compte modifié |
+| 12 | Backend sans client importé | `_sync_email_marketing_lists` sort avant de traiter les inscrits par e-mail seul quand aucun client n'est encore importé |
+| 13 | Plafond de 5 000 sur les listes d'abonnés | `customer_max_per_run` tronque la liste des abonnés lue dans PrestaShop ; au-delà, les suivants seraient désinscrits. Loin des volumes actuels |
+| 14 | Écho des webhooks | Chaque modification faite par Odoo dans PrestaShop revient sous forme de webhook. Sans conséquence, mais c'est du trafic et du bruit dans les logs |
+| 15 | Sécurité des échanges | La clé d'API passe dans l'URL des endpoints du module, et `webhookconfig` renvoie le secret en clair. À corriger des deux côtés ensemble |
+| 16 | Étiquettes « révoqué » | `newsletter_revoked_tag_id` et `partner_offers_revoked_tag_id` ne sont affichées nulle part et ne pilotent rien. Les supprimer ou leur donner un rôle |
 
-### Medium priority
+## 3. Qualité du code
 
-- [ ] **Reuse the customer-map lookup in `_apply_webhook_consents`** — the three import paths now share `_upsert_partner_from_customer_node`; the webhook consents handler still has its own "search `prestashop.customer.map`, reactivate if inactive" lookup (it also handles the email rename, see next item).
+| # | Sujet | Ce qu'il faut faire |
+|---|---|---|
+| 17 | Tests de la logique Odoo | Les tests sans serveur couvrent le client API, les règles de révocation et la vérification des webhooks. La synchro des consentements n'est testée que par la batterie `tests/e2e` |
+| 18 | Découpage de `models/prestashop_backend.py` | Environ 2 400 lignes : configuration, consentements, adresses, clients, commandes. À répartir par domaine |
+| 19 | Recherche du client dans le webhook de consentements | Elle a sa propre recherche par correspondance, alors que les trois chemins d'import partagent `_upsert_partner_from_customer_node` |
+| 20 | Écritures groupées sur le contact | Le webhook de consentements fait jusqu'à six écritures sur la même fiche |
+| 21 | Fichiers hérités à la racine | `test_battery.py`, `TEST_PLAN.md`, `PROMPT_FIX_UNSUBSCRIBE.md` : antérieurs à `tests/` et à `tests/e2e/`, à relire ou retirer |
+| 22 | `webhookconfig.php` (module PrestaShop) | Seul endpoint non aligné sur la classe commune `PrestashopodooApiController` |
+| 23 | `cron_sync_addresses` et `_sync_addresses` | Plus référencés dans le code ; vérifier qu'aucune tâche planifiée créée à la main ne les appelle avant de les supprimer |
 
-- [ ] **Odoo-side tests** — `tests/` only covers the API client and the webhook request checks, with stubs and no Odoo. The consent logic in `models/prestashop_backend.py` has no automated test; `test_battery.py` is a manual read-only script for the Odoo shell.
+## 4. Exploitation
 
-- [ ] **Move email-rename logic into `_fetch_and_create_customer_from_webhook`** — the webhook consents handler handles partner+mc email rename inline. The fetch-and-create helper already renames the partner but not the `mailing.contact`. Moving the mc rename there would let every caller benefit, not just the webhook-consents path.
+| # | Sujet | Ce qu'il faut faire |
+|---|---|---|
+| 24 | Balayage des adresses du `.com` | Resté incomplet : activer le cron hebdomadaire ou relancer « Adresses » jusqu'à « full scan complete » |
+| 25 | Boutiques de test recopiées depuis la production | Refaire après chaque recopie : l'exception du mot de passe HTTP pour `/api/` et `/module/prestashopodoo/`, la configuration du module vers l'Odoo de test, la désactivation du captcha, le mode « ne jamais envoyer d'e-mails » |
+| 26 | Copie de la base Odoo vers la base de test | Cocher « Neutraliser » à la duplication, puis rediriger les backends vers les boutiques de test avant de démarrer le conteneur |
+| 26 bis | Tutoriel d'installation d'Odoo (metrodyn.fr) : instances multiples | Y ajouter la section sur plusieurs instances Odoo partageant un serveur PostgreSQL : `db_name` par instance en plus de `dbfilter`, et redémarrage nécessaire après toute mise à jour de code. Le texte est rédigé, il reste à le publier | Exploitation |
+| 26 ter | Tutoriel d'installation d'Odoo (metrodyn.fr) : copie vers un environnement de test | Rédiger puis publier un encadré sur la duplication d'une base de production : cocher « Neutraliser », couper les tâches planifiées et les envois d'e-mails, rediriger les connexions externes vers les environnements de test avant de démarrer l'instance | Dev pour la rédaction, exploitation pour la publication |
+| 27 | Désinscriptions d'août 2026 sur le `.fr` | Une soixantaine de clients désinscrits par cron du 11 au 16 août, sans modification en masse dans la boutique. Cause inconnue |
 
-- [ ] **Parallelise the PS API fetches** — `list_newsletter_customer_ids`, `list_optin_customer_ids`, and `list_email_only_subscribers` are called back-to-back sequentially in `_sync_email_marketing_lists`. They're independent, so a `ThreadPoolExecutor` with 3 workers would roughly halve the fetch phase on every run.
+## 5. Nouvelles synchronisations
 
-### Low priority
+Aucune n'est commencée, sauf mention. Attendre que la synchronisation actuelle ait tourné quelques semaines sans incident.
 
-- [ ] **Batch `partner.write` calls in `update_tag`** — webhook consents path can issue up to 6 writes on the same partner in a single request (active, email, newsletter tag, offers tag, newsletter_revoked tag, offers_revoked tag). Collapse into one `partner.write({'category_id': [...all ops...]})` where possible.
-
-- [ ] **Constant for the `"0"` customer_id sentinel** — scattered `customer_id != "0"` checks (and `address_id == "0"` in addresses path) would benefit from a named constant or a `_is_real_presta_id(s)` helper.
-
-- [ ] **Harmonise `empty_result` shape with the early-return** — the `no partners` early-return at the top of `_sync_email_marketing_lists` and the `aborted` path both return a zero-counters dict but with different shapes (`aborted` key present or not). Either add the key in both or drop it.
+| # | Synchronisation | Sens | Ce que ça apporte | Dépend de | État |
+|---|---|---|---|---|---|
+| 28 | Produits | À décider | Un catalogue cohérent, indispensable pour importer des commandes proprement | Choix de la référence du catalogue (PIM, Odoo ou boutique) | Seule la table de correspondance existe |
+| 29 | Commandes | Boutique → Odoo | Chiffre d'affaires, historique d'achat par client | Produits | Code présent, désactivé, jamais testé |
+| 30 | Stock | Odoo → boutique | Ne pas vendre un article épuisé, avec trois boutiques sur le même stock | Produits | |
+| 31 | États de commande et suivi colis | Odoo → boutique | Le client voit « expédié » et son numéro de suivi | Commandes | |
+| 32 | Prix et promotions | Odoo → boutique | Un seul endroit pour les tarifs des trois boutiques. La plus risquée | Produits | |
+| 33 | Factures et avoirs | Boutique → Odoo | Comptabilité sans ressaisie | Commandes | |
+| 34 | Paiements | Boutique → Odoo | Rapprochement bancaire | Commandes, factures | |
+| 35 | Retours et remboursements | Les deux | Stock et comptabilité justes après un retour | Commandes | |
+| 36 | Segmentation marketing | Boutique → Odoo | Newsletters ciblées : langue, pays, puis total acheté et date du dernier achat | Rien pour langue et pays ; commandes pour les achats | |
+| 37 | Paniers abandonnés | Boutique → Odoo | Relances depuis Odoo | Produits | |
+| 38 | Informations professionnelles | Boutique → Odoo | Société, numéro de TVA, groupe de clients | Rien | |
+| 39 | Adresses e-mail en erreur | Odoo → boutique | Marquer dans la boutique les adresses qui rejettent les e-mails | Rien | |
 
 ---
 
-## Feature roadmap (out of v1 scope)
+## Limites connues et voulues
 
-### Order import
-
-- [ ] Enable the existing (disabled) "Import Orders" cron and pipeline. Infrastructure is already in place behind a feature toggle. Needs scoping: which statuses sync, do we create sale.orders or invoices, what mapping for product refs, how to handle split/refunds.
-
-### Product sync
-
-- [ ] Only `prestashop.product.map` model exists — no sync logic. Needs a full design pass: direction (Odoo → PS? PS → Odoo?), matching key (reference? EAN?), variants, translations, images, stock.
-
-### Other commerce features
-
-- [ ] Taxes, variants, refunds/returns handling
-- [ ] Invoice/payment reconciliation (link PS orders to Odoo invoices)
-- [ ] Stock sync (bidirectional or Odoo → PS only)
-
----
-
-## Config & data tasks (not code changes)
-
-- [ ] **Check the `prestashopodoo` module config on mcdavidian.hair** — the module endpoints answer on `.hair` (observed 2026-10-04), but the webhook URL/secret configuration has not been verified. Run the backend "Test webhook" button.
-
-- [ ] **Deduplicate Colleen Shirazi on PS .fr** — customer IDs 954 and 982 share the same email. Pushes from Odoo towards 954 fail with PS error 141 ("email already in use"). Identify the correct record (the one with orders / recent activity) and delete or deactivate the other. This is what causes the recurring `errors=1` in push logs.
-
-- [ ] **Investigate the 121 opt_out on the Newsletter .fr list** — anomalously high count. Likely historical (pre-incident) but worth confirming these were legitimate user opt-outs versus remnants of an earlier bug. Check `write_date` distribution on `mailing.subscription` for list `id=39`.
-
----
-
-## Known gaps (documented, may or may not need fixing)
-
-- **Email-only subs deleted from PS stay in Odoo**: intentional post-revert behaviour. The old orphan-cleanup loop was unsafe. Rows *deactivated* in PS (`active=0`) are opted out of the Newsletter list by the sync since 17.0.1.0.76 (explicit signal); rows *deleted* still need manual clean-up. If a safer automation is desired later, it must come with a cap (see Sanity cap above) and explicit per-email logging.
-
-- **PS webhook may not fire on email changes in some back-office flows**: observed during testing. The `actionObjectCustomerUpdateAfter` hook should catch all updates, but the delivery can be delayed up to several minutes due to the PS webhook queue. For bulk email changes, a manual `_import_customers` run remains the reliable path.
-
-- **nginx on `.fr` / `.hair` rejects the `python-requests` User-Agent (403)**: the connector sends its own `OdooPrestashopConnector/1.0` User-Agent since 17.0.1.0.76. If the API returns 403 again, check the nginx anti-bot rules first.
-
-- **Cloudflare (`.fr`, `.hair`)**: on 2026-10-04 both shops answered directly from nginx (not proxied). If the Cloudflare proxy is re-enabled, the API needs a Custom WAF rule `URI Path starts_with "/api/" and ip.src eq <Odoo server IP>` with Skip action, plus Bot Fight Mode OFF; otherwise all customer/address endpoints return 403 and the sync aborts.
-
-- **`respect_odoo_opt_out=True`** on every backend: once a contact is opted-out in Odoo, the sync never re-subscribes them even if the PS flag flips back. Only the real-time webhook and an explicit user action can lift the opt_out. This is the intended governance behaviour.
+- **Odoo → PrestaShop est en révocation seule.** Odoo ne remet jamais `newsletter=1` ni `optin=1` dans la boutique.
+- **Le push n'agit que sur un signal explicite** : désinscription d'une liste ou liste noire. Un contact simplement absent d'une liste Odoo n'est jamais désinscrit dans PrestaShop.
+- **`respect_odoo_opt_out`** : un contact désinscrit dans Odoo n'est pas réinscrit par la synchro planifiée, même si PrestaShop l'indique abonné. Seul un webhook (nouvelle action du client) lève la désinscription.
+- **Inscrits par e-mail seul supprimés de PrestaShop** : ils restent dans Odoo. Seules les lignes désactivées (`active=0`) sont désinscrites, parce que c'est un signal explicite. Une désinscription par le formulaire de la boutique est transmise par le module PrestaShop (1.3.2 et suivants).
+- **Le captcha du formulaire newsletter** n'est pas couvert par les tests : une inscription réelle à la main reste le seul moyen de le vérifier.
+- **nginx du `.fr` et du `.hair`** rejette l'agent `python-requests` (403). Le connecteur envoie `OdooPrestashopConnector/1.0`. En cas de nouveau 403 sur l'API, regarder d'abord les règles anti-robots.
+- **Un conteneur Odoo ne charge le code qu'au démarrage**, et chaque conteneur doit avoir `db_name` dans sa configuration, sinon il exécute les tâches planifiées de toutes les bases du serveur.
