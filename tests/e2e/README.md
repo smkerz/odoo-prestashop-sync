@@ -13,7 +13,7 @@ Both scripts refuse to run outside a test environment:
 
 - A test Odoo database with this module, one backend per test shop
   (base URL `https://dev....`, a Webservice key of that shop, a webhook secret).
-- On each test shop: module `prestashopodoo` (1.3.2 or later) installed and configured with the
+- On each test shop: module `prestashopodoo` (1.3.3 or later) installed and configured with the
   **test** Odoo webhook URL, the same secret and the backend ID.
 - The test Odoo must reach the shop's `/api/` and `/module/prestashopodoo/`
   URLs (if the shop is behind an HTTP password, exempt those two paths).
@@ -59,12 +59,14 @@ Each step prints `PASS` / `FAIL` lines and ends with `OK` or the number of failu
 | e2unsub | newsletter form, subscribed then unsubscribed (the shop deletes the row) | opted out at once (prestashopodoo >= 1.3.2) |
 | c9unsub | customer with newsletter unsubscribes through the newsletter form | opted out at once |
 | c8block | existing customer with partner offers uses the newsletter form | both lists, optin untouched |
+| c10dup | registered account, then a guest order with the same address and a delivery address | one contact, two mappings, the address attached |
 | e4deact | row deactivated directly in the database | opted out by the consent sync (cron path) |
 
 | Test contact | What Odoo does | Expected in the shop |
 |---|---|---|
 | c6optout | Newsletter subscription opted out | newsletter=0, optin unchanged |
 | c7black | email blacklisted | newsletter=0 and optin=0 |
+| c10dup | Newsletter subscription opted out | newsletter=0 on the account and on the guest row (the guest row through the module: the Webservice refuses it, error 141) |
 | e3optout | Newsletter subscription opted out | email-only row deactivated |
 | c1news, c2offers, e1sub | nothing | unchanged |
 

@@ -57,6 +57,9 @@ class FakeShop:
 
     def post(self, url, **kw):
         self.calls.append(("post", url, kw))
+        if "/module/prestashopodoo/customerconsents" in url:
+            known = any(c["id"] == kw["data"]["id_customer"] for c in self.customers)
+            return FakeResponse(200 if known else 404, payload={"status": "ok" if known else "not_found"})
         return FakeResponse(payload={"status": "ok", "updated": 1})
 
     def put(self, url, **kw):
@@ -194,6 +197,21 @@ class TestModuleEndpoints(ClientCase):
 
     def test_inactive_rows_on_request(self):
         self.assertEqual(len(self.client.list_email_only_subscribers(active_only=False)), 2)
+
+    def test_duplicate_email_error_is_recognised(self):
+        check = self.module.PrestaShopClient.is_duplicate_email_error
+        self.assertTrue(check("PrestaShop API error 500: <code><![CDATA[141]]></code>"))
+        self.assertTrue(check(Exception("The email is already used, please choose another one.")))
+        self.assertFalse(check("PrestaShop API error 403: Forbidden"))
+
+    def test_revocation_through_the_module(self):
+        self.assertTrue(self.client.revoke_customer_consents("3", newsletter=True))
+        _method, url, kw = self.shop.calls[-1]
+        self.assertTrue(url.endswith("/module/prestashopodoo/customerconsents"))
+        self.assertEqual(kw["data"], {"id_customer": "3", "newsletter": "0"})
+        self.assertTrue(self.client.revoke_customer_consents("3", newsletter=True, optin=True))
+        self.assertEqual(self.shop.calls[-1][2]["data"], {"id_customer": "3", "newsletter": "0", "optin": "0"})
+        self.assertFalse(self.client.revoke_customer_consents("999", newsletter=True))
 
     def test_webservice_key_never_reaches_the_logs(self):
         def unreachable(url, **kw):

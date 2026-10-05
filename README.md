@@ -32,10 +32,15 @@ Syncs customers, addresses, and marketing consents (newsletter / partner offers)
 - Real-time push on manual opt-out and email blacklist (via model hooks)
 - Async push on email unsubscribe link click (via controller hook, no page delay)
 - Cron as fallback (recommended: every 15 minutes)
+- A guest row whose email also belongs to a registered account cannot be saved through the Webservice (PrestaShop error 141): the revocation then goes through the companion module (1.3.3 or later)
 - Only on an explicit signal: an opted-out list subscription or a blacklisted email. A contact merely absent from an Odoo list is never unsubscribed in PrestaShop
 - Automatic pushes are capped (`opt_out_push_max_per_run`, 25 by default): above the cap nothing is sent and an error is logged. "Preview" shows the volume, the "Odoo → Presta" button applies it without cap
 
 **Important:** Odoo → PrestaShop is **revocation-only**. Odoo never pushes `newsletter=1` or `optin=1` to PrestaShop.
+
+### Alerts
+- When a consent sync is aborted (PrestaShop API not answering) or an automatic push is blocked by the safety limit, the backend shows a red banner and its line turns red in the list
+- Optional alert email per backend, at most one per 24 hours
 
 ### Webhooks
 - HMAC-SHA256 signature verification on all endpoints

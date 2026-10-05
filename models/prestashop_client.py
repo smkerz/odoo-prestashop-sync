@@ -291,6 +291,37 @@ class PrestaShopClient:
             _logger.warning("Failed to unsubscribe email-only %s: %s", email, self._redact(e))
             return None
 
+    @staticmethod
+    def is_duplicate_email_error(error) -> bool:
+        """PrestaShop error 141: the email of this customer row is also used by a registered account."""
+        text = str(error)
+        return "[141]" in text or "The email is already used" in text
+
+    def revoke_customer_consents(self, customer_id: str, newsletter: bool = False, optin: bool = False) -> bool:
+        """Switch consents off for one customer row through the prestashopodoo module (>= 1.3.3).
+
+        Used when the Webservice refuses the PUT (see is_duplicate_email_error). The endpoint
+        only accepts revocations. Returns True when the module confirmed the change.
+        """
+        data = {"id_customer": str(customer_id)}
+        if newsletter:
+            data["newsletter"] = "0"
+        if optin:
+            data["optin"] = "0"
+        try:
+            resp = requests.post(
+                f"{self.base_url}/module/prestashopodoo/customerconsents",
+                params={"ws_key": self.api_key},
+                data=data,
+                headers={"User-Agent": USER_AGENT},
+                timeout=self.timeout,
+                verify=self.verify_tls,
+            )
+            return resp.status_code < 300 and resp.json().get("status") == "ok"
+        except Exception as e:
+            _logger.warning("Failed to revoke consents of customer %s through the module: %s", customer_id, self._redact(e))
+            return False
+
     def get_customer(self, customer_id: str):
         root = self.get_xml(f"customers/{customer_id}")
         return root.find("customer")

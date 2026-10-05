@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from odoo import SUPERUSER_ID, api, fields, models, _
 from odoo.exceptions import UserError
+from odoo.tools import html_escape
 
 from .prestashop_client import PrestaShopClient, PrestaShopAPIError, USER_AGENT
 from . import consent_rules
@@ -209,6 +210,17 @@ class PrestashopBackend(models.Model):
              "The 'Odoo → Presta' button is not limited. 0 = no limit.",
     )
 
+    # Health: a failed sync must be visible without reading the logs
+    sync_alert_message = fields.Char(string="Current alert", readonly=True, copy=False)
+    sync_alert_kind = fields.Char(readonly=True, copy=False)
+    sync_alert_date = fields.Datetime(string="Alert since", readonly=True, copy=False)
+    sync_alert_mail_date = fields.Datetime(readonly=True, copy=False)
+    alert_email = fields.Char(
+        string="Alert email",
+        help="If set, an email is sent to this address when a sync is aborted or an automatic push is "
+             "blocked by the safety limit (at most one email per 24 hours for this backend).",
+    )
+
     include_guest_customers = fields.Boolean(
         default=True,
         help="If enabled, guest checkout customers are also imported."
@@ -302,6 +314,35 @@ class PrestashopBackend(models.Model):
             env = api.Environment(cr, SUPERUSER_ID, {})
             env["prestashop.sync.log"].sudo().create(vals)
             cr.commit()
+
+    def _raise_alert(self, kind, message):
+        """Flag a failure on the backend (red banner) and email it, at most once a day."""
+        self.ensure_one()
+        now = fields.Datetime.now()
+        vals = {"sync_alert_kind": kind, "sync_alert_message": message}
+        if self.sync_alert_kind != kind:
+            vals["sync_alert_date"] = now
+        mailed_recently = self.sync_alert_mail_date and self.sync_alert_mail_date > now - timedelta(hours=24)
+        if self.alert_email and not mailed_recently:
+            self.env["mail.mail"].sudo().create({
+                "subject": f"[PrestaShop connector] {self.name}: {message}",
+                "body_html": f"<p>{html_escape(message)}</p><p>Backend: {html_escape(self.name)}</p>",
+                "email_to": self.alert_email,
+                "email_from": self.company_id.partner_id.email_formatted or False,
+            })
+            vals["sync_alert_mail_date"] = now
+        self.write(vals)
+
+    def _clear_alert(self, kind):
+        """Remove the banner once the operation that raised it works again."""
+        self.ensure_one()
+        if self.sync_alert_kind == kind:
+            self.write({"sync_alert_kind": False, "sync_alert_message": False, "sync_alert_date": False})
+
+    @staticmethod
+    def _consents_aborted(result) -> bool:
+        """True when _sync_email_marketing_lists could not read a list from PrestaShop."""
+        return any(result[key].get("aborted") for key in ("newsletter", "offers"))
 
     def _lock_key(self, operation: str) -> int:
         """Return a stable 32-bit advisory lock key for this backend + operation."""
@@ -565,8 +606,9 @@ class PrestashopBackend(models.Model):
             try:
                 def run():
                     client = backend._client()
-                    backend._sync_email_marketing_lists(client=client, preview=False)
-                    backend.last_consents_sync = fields.Datetime.now()
+                    result = backend._sync_email_marketing_lists(client=client, preview=False)
+                    if not backend._consents_aborted(result):
+                        backend.last_consents_sync = fields.Datetime.now()
                 backend._run_locked("sync_consents", run)
             except Exception as e:
                 backend._log("sync_consents", "error", "Cron: failed to sync consents", details=str(e))
@@ -950,10 +992,17 @@ class PrestashopBackend(models.Model):
                         "opt_out_skipped": 0, "list_opt_out_skipped": 0, "aborted": True}
         res_news = sync_one_list(list_news, desired_news, desired_news_emails) if news_ok else dict(empty_result)
         res_news["email_only_deactivated"] = opt_out_deactivated_email_only()
-        return {
+        result = {
             "newsletter": res_news,
             "offers": sync_one_list(list_offers, desired_offers) if offers_ok else dict(empty_result),
         }
+        if not preview:
+            if self._consents_aborted(result):
+                self._raise_alert("sync", "Consent sync aborted: the PrestaShop API did not answer. "
+                                          "Nothing was changed for the lists that could not be read.")
+            else:
+                self._clear_alert("sync")
+        return result
 
     def _upsert_partner_from_customer_node(self, client, node, prestashop_id, tag, site_tag):
         """Create or update the partner (and its mapping) of a PrestaShop <customer> node.
@@ -1002,6 +1051,13 @@ class PrestashopBackend(models.Model):
                 "partner_id": partner.id,
             })
         return partner, created
+
+    def _ensure_customer_map(self, prestashop_id, partner):
+        """Link a PrestaShop customer id to a partner, unless that id is already mapped."""
+        self.ensure_one()
+        CustomerMap = self.env["prestashop.customer.map"].sudo().with_context(active_test=False)
+        if not CustomerMap.search_count([("backend_id", "=", self.id), ("prestashop_id", "=", prestashop_id)]):
+            CustomerMap.create({"backend_id": self.id, "prestashop_id": prestashop_id, "partner_id": partner.id})
 
     def _fetch_and_create_customer_from_webhook(self, prestashop_id: str):
         """Fetch customer from PrestaShop and create/update in Odoo.
@@ -1092,6 +1148,10 @@ class PrestashopBackend(models.Model):
             partner = Partner.search([("email", "=ilike", email)], limit=1)
             if partner and not partner.active:
                 partner.write({"active": True})
+            # Known contact, new PrestaShop account (or guest order): link them now, so the
+            # address webhook that follows finds its customer.
+            if partner and customer_id and customer_id != "0" and self.include_guest_customers:
+                self._ensure_customer_map(customer_id, partner)
 
         if not partner and customer_id and customer_id != "0":
             try:
@@ -1412,12 +1472,17 @@ class PrestashopBackend(models.Model):
         stats["email_only"] = len(email_only_plan)
         total = consent_rules.count_revocations(customer_plan, email_only_plan)
 
-        if preview or not total:
+        if preview:
+            return stats
+        if not total:
+            self._clear_alert("push")
             return stats
 
         cap = int(self.opt_out_push_max_per_run or 0)
         if enforce_cap and consent_rules.exceeds_cap(total, cap):
             stats["aborted"] = True
+            self._raise_alert("push", f"Odoo -> PrestaShop push blocked: {total} revocations exceed the limit "
+                                      f"of {cap} per automatic run. Check with Preview before applying.")
             self._log(
                 operation, "error",
                 f"Odoo->PrestaShop push aborted: {total} revocations exceed the limit of {cap} per automatic run.",
@@ -1431,6 +1496,12 @@ class PrestashopBackend(models.Model):
                 client.update_customer_consents(customer_id, newsletter=newsletter, optin=optin)
                 stats["updated"] += 1
             except Exception as e:
+                # The Webservice refuses to save a guest row whose email also belongs to a
+                # registered account (error 141). The module can switch the flags off directly.
+                if client.is_duplicate_email_error(e) and client.revoke_customer_consents(
+                        customer_id, newsletter=newsletter == 0, optin=optin == 0):
+                    stats["updated"] += 1
+                    continue
                 stats["errors"] += 1
                 self._log(operation, "error", "Failed to sync consents to PrestaShop.",
                           details=str(e), prestashop_id=customer_id)
@@ -1447,6 +1518,7 @@ class PrestashopBackend(models.Model):
                 self._log(operation, "error", "Failed to unsubscribe email-only subscriber.",
                           details=f"email={email} result={result!r}")
 
+        self._clear_alert("push")
         self._log(
             operation,
             "ok" if stats["errors"] == 0 else "warning",
@@ -1471,10 +1543,13 @@ class PrestashopBackend(models.Model):
                 )
                 push = backend._push_opt_outs_to_prestashop(client, preview=True)
                 msg += f" | Odoo → Presta would revoke: customers={push['customers']}, email_only={push['email_only']}"
-                backend._log("preview_consents", "ok", msg)
-                return msg
-            msg = backend._run_locked("preview_consents", run)
-        return self._notification(msg, sticky=True)
+                aborted = backend._consents_aborted(res)
+                if aborted:
+                    msg = "ABORTED, the PrestaShop API did not answer: these figures are not reliable. " + msg
+                backend._log("preview_consents", "error" if aborted else "ok", msg)
+                return msg, aborted
+            msg, aborted = backend._run_locked("preview_consents", run)
+        return self._notification(msg, sticky=True, notif_type="danger" if aborted else None)
 
     def action_sync_consents(self):
         for backend in self:
@@ -1482,7 +1557,9 @@ class PrestashopBackend(models.Model):
                 start = time.perf_counter()
                 client = backend._client()
                 res = backend._sync_email_marketing_lists(client=client, preview=False)
-                backend.last_consents_sync = fields.Datetime.now()
+                aborted = backend._consents_aborted(res)
+                if not aborted:
+                    backend.last_consents_sync = fields.Datetime.now()
                 dur = time.perf_counter() - start
                 msg = (
                     f"Consents synced. Newsletter subscribe={res['newsletter']['subscribe']}, unsubscribe={res['newsletter']['unsubscribe']}, "
@@ -1491,10 +1568,13 @@ class PrestashopBackend(models.Model):
                     f"Offers subscribe={res['offers']['subscribe']}, unsubscribe={res['offers']['unsubscribe']} "
                     f"(opt_out_skipped={res['offers']['opt_out_skipped']}, list_opt_out_skipped={res['offers'].get('list_opt_out_skipped', 0)})"
                 )
-                backend._log("sync_consents", "ok", msg, duration_sec=dur)
-                return msg
-            msg = backend._run_locked("sync_consents", run)
-        return self._notification(msg)
+                if aborted:
+                    msg = ("Consent sync ABORTED, the PrestaShop API did not answer: nothing was changed "
+                           "for the lists that could not be read. " + msg)
+                backend._log("sync_consents", "error" if aborted else "ok", msg, duration_sec=dur)
+                return msg, aborted
+            msg, aborted = backend._run_locked("sync_consents", run)
+        return self._notification(msg, sticky=aborted, notif_type="danger" if aborted else None)
 
     def action_push_opt_outs_to_prestashop(self):
         """Sync consents from Odoo to PrestaShop (revocation-only).

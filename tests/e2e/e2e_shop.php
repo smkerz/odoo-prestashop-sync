@@ -65,7 +65,7 @@ function newRequest()
     $flag->setValue($module, false);
 }
 
-function createCustomer($name, $newsletter, $optin)
+function createCustomer($name, $newsletter, $optin, $isGuest = false)
 {
     newRequest();
     $c = new Customer();
@@ -75,6 +75,7 @@ function createCustomer($name, $newsletter, $optin)
     $c->passwd = Tools::hash(uniqid('e2e', true));
     $c->newsletter = (int)$newsletter;
     $c->optin = (int)$optin;
+    $c->is_guest = (int)$isGuest;
     $c->id_default_group = (int)Configuration::get('PS_CUSTOMER_GROUP');
     $c->add();
     return $c;
@@ -120,6 +121,13 @@ function newsletterForm($email, $action)
     return $readAndReset();
 }
 
+function countCustomers($name, $where = '1')
+{
+    return (int)Db::getInstance()->getValue(
+        'SELECT COUNT(*) FROM ' . _DB_PREFIX_ . 'customer WHERE email = "' . pSQL(email($name)) . '" AND ' . $where
+    );
+}
+
 function emailOnlyActive($name)
 {
     return Db::getInstance()->getValue(
@@ -158,8 +166,8 @@ if ($phase === 'setup') {
     check('webhook configured and enabled',
         Configuration::get('PSODOO_WEBHOOK_URL') && Configuration::get('PSODOO_WEBHOOK_SECRET') && Configuration::get('PSODOO_WEBHOOK_ENABLED'));
     check('ps_emailsubscription installed', (bool)Module::isInstalled('ps_emailsubscription'));
-    check('prestashopodoo is at least 1.3.2 (reports newsletter unsubscriptions)',
-        version_compare($module->version, '1.3.2', '>='), 'installed: ' . $module->version);
+    check('prestashopodoo is at least 1.3.3 (newsletter unsubscriptions, revocation of guest rows)',
+        version_compare($module->version, '1.3.3', '>='), 'installed: ' . $module->version);
 
     createCustomer('c1news', 1, 0);
     createCustomer('c2offers', 0, 1);
@@ -225,6 +233,13 @@ if ($phase === 'setup') {
         !$error && $c && (int)$c->newsletter === 1 && (int)$c->optin === 1,
         $c ? "newsletter={$c->newsletter} optin={$c->optin} error=$error" : 'customer not found');
 
+    // A registered account, then a guest order with the same address: PrestaShop keeps two
+    // rows, and its Webservice refuses to save the guest one (error 141).
+    createCustomer('c10dup', 1, 0);
+    $guest = createCustomer('c10dup', 1, 0, true);
+    createAddress($guest, 'Nantes');
+    check('duplicate: the account and the guest order are two rows with the same address', countCustomers('c10dup') === 2);
+
     $failed = failedWebhooksSince($started);
     check('every webhook was accepted by Odoo', $failed === 0, "$failed failed, see the PrestaShop logs");
     echo "Next: run e2e_odoo.py with E2E_PHASE=check, then this script with \"verify\".\n";
@@ -245,6 +260,9 @@ if ($phase === 'verify') {
     check('c2: untouched customer still has optin', $c && (int)$c->optin === 1 && (int)$c->newsletter === 0);
     check('e3: Odoo opt-out deactivated the email-only row', (string)emailOnlyActive('e3optout') === '0');
     check('e1: untouched email-only row is still active', (string)emailOnlyActive('e1sub') === '1');
+    check('c10: Odoo opt-out switched the newsletter off on the account and on the guest row',
+        countCustomers('c10dup') === 2 && countCustomers('c10dup', 'newsletter = 1') === 0,
+        'rows still subscribed: ' . countCustomers('c10dup', 'newsletter = 1'));
     $c = findCustomer('c8block');
     check('c8: customer who used the newsletter block kept both consents',
         $c && (int)$c->newsletter === 1 && (int)$c->optin === 1,
