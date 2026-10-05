@@ -11,9 +11,7 @@ Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 
 | # | Sujet | Ce qu'il faut faire | Qui |
 |---|---|---|---|
-| 0 | Refaire la batterie de tests | Les scripts `tests/e2e` ont été modifiés lors de la passe de propreté (version 17.0.1.0.83) sans être relancés. Mettre à jour l'exemplaire de test, puis rejouer un passage complet sur `dev.mcdavidian.com` et `dev.mcdavidian.fr` avant tout déploiement en production | Exploitation, avec dev |
-| 1 | Cron « Import Orders » | Le désactiver : l'import de commandes est coupé, il tourne pour rien | Exploitation |
-| 2 | Première nuit de crons | Relire les logs du connecteur après la remise en route du 4 octobre | Exploitation, puis dev |
+| 2 bis | Contrôle des inscriptions et désinscriptions en masse | Vérifier vers le 19 octobre 2026, puis début novembre, qu'aucune vague anormale d'inscriptions ou de désinscriptions n'est apparue depuis la remise en route du 4 octobre. Requêtes et repères : voir « Contrôle périodique » en bas de ce fichier | Exploitation, puis dev |
 | 3 | Sauvegardes locales | Sortir du dépôt le dossier de sauvegardes de la base (exclu de git, mais présent dans le dossier de travail) | Exploitation |
 | 4 | Dépôts GitHub | Décider de leur visibilité : ils sont publics et contiennent des fichiers d'adresses | Exploitation |
 | 5 | Clé d'API du `.hair` | La régénérer et la mettre à jour dans le backend Odoo : elle est apparue en clair dans des logs | Exploitation |
@@ -28,6 +26,7 @@ Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 | 9 | Plafond Presta → Odoo | Refuser une synchro qui désinscrirait une part anormale d'une liste en un passage, comme le fait déjà le push Odoo → Presta (`opt_out_push_max_per_run`) |
 | 10 | Comptes en double (erreur 141) | PrestaShop refuse par son API toute modification d'un client dont l'adresse e-mail est aussi celle d'un autre compte. Le push échoue alors à chaque passage pour ces clients. Soit dédoublonner dans la boutique, soit retirer le consentement par un endpoint du module, et ne journaliser l'erreur qu'une fois |
 | 11 | Deux comptes reliés à la même fiche | Quand deux comptes PrestaShop pointent vers le même contact Odoo, l'adresse e-mail du contact suit le dernier compte modifié |
+| 11 bis | Client existant qui crée un compte | Quand le webhook de consentements retrouve le contact par son adresse e-mail (contact déjà présent dans Odoo), il ne crée pas la correspondance avec le compte PrestaShop. Le webhook d'adresse qui suit est alors ignoré (« customer mapping not found »), jusqu'au prochain import clients. Créer la correspondance dès le webhook |
 | 12 | Backend sans client importé | `_sync_email_marketing_lists` sort avant de traiter les inscrits par e-mail seul quand aucun client n'est encore importé |
 | 13 | Plafond de 5 000 sur les listes d'abonnés | `customer_max_per_run` tronque la liste des abonnés lue dans PrestaShop ; au-delà, les suivants seraient désinscrits. Loin des volumes actuels |
 | 14 | Écho des webhooks | Chaque modification faite par Odoo dans PrestaShop revient sous forme de webhook. Sans conséquence, mais c'est du trafic et du bruit dans les logs |
@@ -50,7 +49,6 @@ Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 
 | # | Sujet | Ce qu'il faut faire |
 |---|---|---|
-| 24 | Balayage des adresses du `.com` | Resté incomplet : activer le cron hebdomadaire ou relancer « Adresses » jusqu'à « full scan complete » |
 | 25 | Boutiques de test recopiées depuis la production | Refaire après chaque recopie : l'exception du mot de passe HTTP pour `/api/` et `/module/prestashopodoo/`, la configuration du module vers l'Odoo de test, la désactivation du captcha, le mode « ne jamais envoyer d'e-mails » |
 | 26 | Copie de la base Odoo vers la base de test | Cocher « Neutraliser » à la duplication, puis rediriger les backends vers les boutiques de test avant de démarrer le conteneur |
 | 26 bis | Tutoriel d'installation d'Odoo (metrodyn.fr) : instances multiples | Y ajouter la section sur plusieurs instances Odoo partageant un serveur PostgreSQL : `db_name` par instance en plus de `dbfilter`, et redémarrage nécessaire après toute mise à jour de code. Le texte est rédigé, il reste à le publier | Exploitation |
@@ -75,6 +73,33 @@ Aucune n'est commencée, sauf mention. Attendre que la synchronisation actuelle 
 | 37 | Paniers abandonnés | Boutique → Odoo | Relances depuis Odoo | Produits | |
 | 38 | Informations professionnelles | Boutique → Odoo | Société, numéro de TVA, groupe de clients | Rien | |
 | 39 | Adresses e-mail en erreur | Odoo → boutique | Marquer dans la boutique les adresses qui rejettent les e-mails | Rien | |
+
+---
+
+## Contrôle périodique : vagues d'inscriptions ou de désinscriptions
+
+À lancer sur le serveur Odoo, en lecture seule. Aucune adresse n'est affichée.
+
+Désinscriptions et inscriptions groupées à la même minute, depuis le 5 octobre 2026 :
+
+```bash
+docker exec odoo17-db psql -U odoo17 -d mcdavidian -c "select l.name, to_char(s.opt_out_datetime,'YYYY-MM-DD HH24:MI') as minute_utc, count(*) as desinscriptions from mailing_subscription s join mailing_list l on l.id = s.list_id where s.opt_out and s.opt_out_datetime >= '2026-10-05' and l.name ilike '%Prestashop - mcdavidian.%' group by 1, 2 having count(*) >= 5 order by 3 desc limit 20;" -c "select l.name, to_char(s.create_date,'YYYY-MM-DD HH24:MI') as minute_utc, count(*) as inscriptions from mailing_subscription s join mailing_list l on l.id = s.list_id where s.create_date >= '2026-10-05' and l.name ilike '%Prestashop - mcdavidian.%' group by 1, 2 having count(*) >= 5 order by 3 desc limit 20;"
+```
+
+Abonnés actifs par liste, et dernières erreurs du connecteur :
+
+```bash
+docker exec odoo17-db psql -U odoo17 -d mcdavidian -c "select l.name, count(*) filter (where not s.opt_out) as abonnes_actifs, count(*) filter (where s.opt_out) as desinscrits from mailing_subscription s join mailing_list l on l.id = s.list_id where l.name ilike '%Prestashop - mcdavidian.%' group by 1 order by 1;" -c "select to_char(create_date,'MM-DD HH24:MI') as quand, operation, left(message, 100) as message from prestashop_sync_log where status = 'error' and create_date > now() - interval '15 days' and message not like 'Failed to sync consents to PrestaShop.' order by id desc limit 15;"
+```
+
+Comment lire le résultat :
+
+- **Une ligne à 5 désinscriptions ou plus à la même minute** est suspecte : de vraies personnes ne se désinscrivent pas ensemble. Exception connue : une campagne envoyée peu avant, qui provoque des désinscriptions étalées sur plusieurs minutes, pas concentrées sur une seule.
+- **Une ligne à 5 inscriptions ou plus à la même minute** signale soit un import de clients (normal après un rattrapage), soit une vague de robots sur le formulaire newsletter.
+- **Une erreur « push aborted … revocations exceed the limit »** signifie que le plafond de sécurité a bloqué un envoi anormal vers une boutique : ne pas forcer avec le bouton, chercher d'abord la cause avec « Preview ».
+- **Repères au 5 octobre 2026**, clients abonnés à la newsletter dans les boutiques : `.com` environ 170, `.fr` 70, `.hair` 161. Une chute brutale de l'un de ces chiffres est le signe d'un incident.
+
+Les erreurs « Failed to sync consents to PrestaShop. » sont exclues de la seconde requête : ce sont les comptes en double connus (point 10).
 
 ---
 
