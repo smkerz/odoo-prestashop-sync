@@ -56,8 +56,8 @@ class MailingContact(models.Model):
         # opt_out set directly on the contact
         if vals.get("opt_out"):
             should_push = True
-        # Check all possible subscription field names
-        for field in ("subscription_ids", "subscription_list_ids", "list_ids"):
+        # Subscription lines edited from the contact form (field name depends on the Odoo version)
+        for field in ("subscription_ids", "subscription_list_ids"):
             if field in vals and _has_opt_out_in_commands(vals[field]):
                 should_push = True
                 break

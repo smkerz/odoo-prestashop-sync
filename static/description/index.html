@@ -45,6 +45,8 @@
         <li>Une désinscription d'une liste dans Odoo retire le consentement correspondant dans PrestaShop.</li>
         <li>Une adresse mise en liste noire perd ses deux consentements, sur toutes les boutiques.</li>
         <li>Envoi immédiat lors d'une désinscription manuelle, d'une mise en liste noire ou d'un clic sur le lien de désinscription d'un e-mail ; une tâche planifiée sert de rattrapage.</li>
+        <li>Uniquement sur un signal explicite : un contact simplement absent d'une liste Odoo n'est jamais désinscrit dans PrestaShop.</li>
+        <li>Les envois automatiques sont plafonnés (25 révocations par passage, réglable) ; au-delà, rien n'est envoyé et une erreur est journalisée.</li>
     </ul>
     <div class="alert alert-info" role="alert">
         Odoo n'inscrit jamais personne dans PrestaShop : il ne fait qu'y retirer des consentements.
@@ -56,7 +58,7 @@
     <ul>
         <li>Odoo 17 (Community ou Enterprise), avec les modules Ventes, Stock, Contacts et E-mail Marketing.</li>
         <li>PrestaShop 1.7 ou plus récent.</li>
-        <li>Le module PrestaShop <code>prestashopodoo</code> pour le temps réel et les inscrits du bloc newsletter.
+        <li>Le module PrestaShop <code>prestashopodoo</code> (1.3.2 ou plus récent) pour le temps réel, les inscrits du bloc newsletter et les désinscriptions faites par le formulaire de la boutique.
             Sans lui, seuls les clients, les adresses et les consentements des comptes clients sont synchronisés, par tâches planifiées.</li>
     </ul>
 </section>
@@ -104,7 +106,7 @@
         <tbody>
             <tr><td>Test</td><td>Vérifie l'accès à l'API PrestaShop.</td></tr>
             <tr><td>Webhook</td><td>Vérifie la liaison complète dans les deux sens : configuration du module PrestaShop, secret, envoi d'un webhook de test.</td></tr>
-            <tr><td>Preview</td><td>Calcule ce que ferait la synchronisation des consentements, sans rien modifier.</td></tr>
+            <tr><td>Preview</td><td>Calcule ce que feraient la synchronisation des consentements et l'envoi des révocations vers la boutique, sans rien modifier.</td></tr>
             <tr><td>Import, Adresses, Presta → Odoo, Odoo → Presta</td><td>Lancent chaque synchronisation à la main.</td></tr>
         </tbody>
     </table>

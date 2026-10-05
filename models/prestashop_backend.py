@@ -16,8 +16,6 @@ import requests
 
 _logger = logging.getLogger(__name__)
 
-DT_FMT = "%Y-%m-%d %H:%M:%S"
-
 class PrestashopBackend(models.Model):
     _name = "prestashop.backend"
     _description = "PrestaShop Backend"
@@ -176,9 +174,9 @@ class PrestashopBackend(models.Model):
         "res.partner.category",
         string="Newsletter Revoked Tag (Odoo)",
         help=(
-            "If this tag is set on a contact, Odoo will treat the Newsletter consent as revoked "
-            "(even if PrestaShop still shows newsletter=1). During Odoo -> Presta consent sync, "
-            "we will push newsletter=0."
+            "Informational tag. It is removed from the contact when PrestaShop reports the newsletter "
+            "consent again. It does not drive the Odoo -> PrestaShop push, which only follows "
+            "list opt-outs and the blacklist."
         ),
     )
 
@@ -186,9 +184,9 @@ class PrestashopBackend(models.Model):
         "res.partner.category",
         string="Partner Offers Revoked Tag (Odoo)",
         help=(
-            "If this tag is set on a contact, Odoo will treat the Partner Offers consent as revoked "
-            "(even if PrestaShop still shows optin=1). During Odoo -> Presta consent sync, "
-            "we will push optin=0."
+            "Informational tag. It is removed from the contact when PrestaShop reports the partner "
+            "offers consent again. It does not drive the Odoo -> PrestaShop push, which only follows "
+            "list opt-outs and the blacklist."
         ),
     )
 
@@ -339,9 +337,9 @@ class PrestashopBackend(models.Model):
         finally:
             self._release_lock(lock_key)
 
-    def _notification(self, message, title=None, notif_type=None):
+    def _notification(self, message, title=None, notif_type=None, sticky=False):
         """Client action showing a toast to the user."""
-        params = {"title": title or _("PrestaShop"), "message": message, "sticky": False}
+        params = {"title": title or _("PrestaShop"), "message": message, "sticky": sticky}
         if notif_type:
             params["type"] = notif_type
         return {"type": "ir.actions.client", "tag": "display_notification", "params": params}
@@ -851,7 +849,6 @@ class PrestashopBackend(models.Model):
         # ──────────────────────────────────────────────────────────────
 
         blacklisted_emails = self._blacklisted_emails(emails)
-        sub_field_name = self._discover_subscription_field(MailingContact)
 
         def _is_list_opted_out(mc_rec, list_rec):
             """Check if contact has opt_out=True for a specific list."""
@@ -942,15 +939,7 @@ class PrestashopBackend(models.Model):
 
         def opt_out_deactivated_email_only():
             """Opt out of the Newsletter list the email-only subs deactivated in PS."""
-            if not deactivated_news_emails or not sub_field_name:
-                return 0
-            contacts = MailingContact.search([("email_normalized", "in", list(deactivated_news_emails))])
-            Subscription = self.env[MailingContact._fields[sub_field_name].comodel_name].sudo()
-            subs = Subscription.search([
-                ("contact_id", "in", contacts.ids),
-                ("list_id", "=", list_news.id),
-                ("opt_out", "=", False),
-            ])
+            subs = self._list_subscriptions(list_news, deactivated_news_emails, opt_out=False)
             if subs and not preview:
                 subs.write({"opt_out": True})
                 self._log("sync_email_marketing", "ok",
@@ -1329,19 +1318,24 @@ class PrestashopBackend(models.Model):
         self._log("sync_addresses", "warning", f"Webhook address: unknown action={action}")
         return {"status": "error", "message": f"unknown action: {action}"}
 
-    def _opted_out_emails(self, list_rec, emails):
-        """Return the normalized emails explicitly opted out of a mailing list."""
+    def _list_subscriptions(self, list_rec, emails, opt_out):
+        """Return the subscriptions of `emails` to a mailing list, opted out or not."""
         MailingContact = self.env["mailing.contact"].sudo()
         fname = self._discover_subscription_field(MailingContact)
         if not fname or not emails:
-            return set()
-        Subscription = self.env[MailingContact._fields[fname].comodel_name].sudo()
-        subs = Subscription.search([
+            return []
+        return self.env[MailingContact._fields[fname].comodel_name].sudo().search([
             ("list_id", "=", list_rec.id),
-            ("opt_out", "=", True),
+            ("opt_out", "=", opt_out),
             ("contact_id.email_normalized", "in", list(emails)),
         ])
-        return {self._norm_email(sub.contact_id.email_normalized) for sub in subs}
+
+    def _opted_out_emails(self, list_rec, emails):
+        """Return the normalized emails explicitly opted out of a mailing list."""
+        return {
+            self._norm_email(sub.contact_id.email_normalized)
+            for sub in self._list_subscriptions(list_rec, emails, opt_out=True)
+        }
 
     def _push_opt_outs_to_prestashop(self, client, preview=False, enforce_cap=True):
         """Push Odoo-side consent revocations to PrestaShop.
@@ -1480,7 +1474,7 @@ class PrestashopBackend(models.Model):
                 backend._log("preview_consents", "ok", msg)
                 return msg
             msg = backend._run_locked("preview_consents", run)
-        return self._notification(msg)
+        return self._notification(msg, sticky=True)
 
     def action_sync_consents(self):
         for backend in self:

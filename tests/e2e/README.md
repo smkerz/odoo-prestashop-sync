@@ -54,14 +54,12 @@ Each step prints `PASS` / `FAIL` lines and ends with `OK` or the number of failu
 | c3toggle | newsletter on, then off | Newsletter subscription opted out |
 | c4old → c4new | email changed | partner and mailing contact follow the new email |
 | c5addr | address created and updated, a second one created and deleted | one delivery address, updated city |
-| e1sub | newsletter block subscription (no account) | mailing contact subscribed, no partner |
-| e2unsub | newsletter block, then unsubscribed | opted out |
-| e4deact | row deactivated directly in the database | opted out by the consent sync (cron path) |
-| f1sub | real newsletter form, new address (then the same address again: refused) | mailing contact subscribed, no partner |
-| f3bad | real newsletter form, invalid address: refused | nothing |
-| f2unsub | real newsletter form, subscribed then unsubscribed (the shop deletes the row) | opted out at once (prestashopodoo >= 1.3.2) |
+| e1sub | newsletter form, new address (then the same address again: refused) | mailing contact subscribed, no partner |
+| e5bad | newsletter form, invalid address: refused | nothing |
+| e2unsub | newsletter form, subscribed then unsubscribed (the shop deletes the row) | opted out at once (prestashopodoo >= 1.3.2) |
 | c9unsub | customer with newsletter unsubscribes through the newsletter form | opted out at once |
 | c8block | existing customer with partner offers uses the newsletter form | both lists, optin untouched |
+| e4deact | row deactivated directly in the database | opted out by the consent sync (cron path) |
 
 | Test contact | What Odoo does | Expected in the shop |
 |---|---|---|
@@ -70,8 +68,9 @@ Each step prints `PASS` / `FAIL` lines and ends with `OK` or the number of failu
 | e3optout | Newsletter subscription opted out | email-only row deactivated |
 | c1news, c2offers, e1sub | nothing | unchanged |
 
-The "real newsletter form" scenarios call the code of `ps_emailsubscription`
-directly; they need the captcha module (`eicaptcha`) disabled on the test shop.
+The newsletter form scenarios call the code of `ps_emailsubscription` directly
+(what the footer form runs); they need the captcha module (`eicaptcha`) disabled
+on the test shop.
 
 Not covered: the captcha itself, and the signature check, which has its own
 unit tests in `tests/test_webhook_controller.py`.

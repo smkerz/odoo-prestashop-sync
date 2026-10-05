@@ -101,28 +101,6 @@ function findCustomer($name)
     return $rows ? new Customer((int)$rows[0]['id_customer']) : null;
 }
 
-/** Same effect as the newsletter block of the footer, without the form (and its captcha). */
-function newsletterBlock($name, $subscribe)
-{
-    $email = email($name);
-    $where = 'email = "' . pSQL($email) . '"';
-    if ($subscribe) {
-        Db::getInstance()->insert('emailsubscription', array(
-            'id_shop' => (int)Context::getContext()->shop->id,
-            'id_shop_group' => (int)Context::getContext()->shop->id_shop_group,
-            'email' => pSQL($email),
-            'newsletter_date_add' => date('Y-m-d H:i:s'),
-            'ip_registration_newsletter' => '127.0.0.1',
-            'http_referer' => 'e2e',
-            'active' => 1,
-            'id_lang' => (int)Configuration::get('PS_LANG_DEFAULT'),
-        ));
-    } else {
-        Db::getInstance()->update('emailsubscription', array('active' => 0), $where);
-    }
-    Hook::exec('actionNewsletterRegistrationAfter', array('email' => $email, 'action' => $subscribe ? '0' : '1', 'error' => null));
-}
-
 /**
  * Submit the newsletter block through the real code of ps_emailsubscription (what the
  * footer form runs once the captcha is passed). Returns array(error, confirmation).
@@ -173,7 +151,7 @@ if ($phase === 'setup') {
         $max = (int)Db::getInstance()->getValue('SELECT MAX(' . $key . ') FROM ' . _DB_PREFIX_ . $table);
         if ($max < E2E_FIRST_ID) {
             Db::getInstance()->execute('ALTER TABLE ' . _DB_PREFIX_ . $table . ' AUTO_INCREMENT = ' . E2E_FIRST_ID);
-            echo "ids of new {$table}s on this test shop now start at " . E2E_FIRST_ID . "\n";
+            echo "new ids in the $table table of this test shop now start at " . E2E_FIRST_ID . "\n";
         }
     }
     $started = date('Y-m-d H:i:s');
@@ -206,33 +184,31 @@ if ($phase === 'setup') {
     createCustomer('c6optout', 1, 1);
     createCustomer('c7black', 1, 1);
 
-    newsletterBlock('e1sub', true);
-    newsletterBlock('e2unsub', true);
-    newsletterBlock('e2unsub', false);
-    newsletterBlock('e3optout', true);
-    newsletterBlock('e4deact', true);
-    // Deactivated straight in the database, with no hook: only the Odoo cron can see it.
-    Db::getInstance()->update('emailsubscription', array('active' => 0), 'email = "' . pSQL(email('e4deact')) . '"');
-
     check('7 test customers created', count(array_filter(array(
         findCustomer('c1news'), findCustomer('c2offers'), findCustomer('c3toggle'), findCustomer('c4new'),
         findCustomer('c5addr'), findCustomer('c6optout'), findCustomer('c7black'),
     ))) === 7);
 
-    // --- the real newsletter form (needs the captcha module disabled on the test shop) ---
-    list($error, $ok) = newsletterForm(email('f1sub'), '0');
-    check('form: a new address is subscribed', !$error && $ok && (string)emailOnlyActive('f1sub') === '1', (string)$error);
+    // --- the newsletter block, through the real code of ps_emailsubscription ---
+    // (what the footer form runs; needs the captcha module disabled on the test shop)
+    list($error, $ok) = newsletterForm(email('e1sub'), '0');
+    check('form: a new address is subscribed', !$error && $ok && (string)emailOnlyActive('e1sub') === '1', (string)$error);
 
-    list($error) = newsletterForm(email('f1sub'), '0');
-    check('form: the same address again is refused', (bool)$error && (string)emailOnlyActive('f1sub') === '1');
+    list($error) = newsletterForm(email('e1sub'), '0');
+    check('form: the same address again is refused', (bool)$error && (string)emailOnlyActive('e1sub') === '1');
 
-    list($error) = newsletterForm("e2e-$tag-f3bad@@example", '0');
+    list($error) = newsletterForm("e2e-$tag-e5bad@@example", '0');
     check('form: an invalid address is refused', (bool)$error);
 
-    newsletterForm(email('f2unsub'), '0');
-    list($error, $ok) = newsletterForm(email('f2unsub'), '1');
+    newsletterForm(email('e2unsub'), '0');
+    list($error, $ok) = newsletterForm(email('e2unsub'), '1');
     // For a visitor without account, ps_emailsubscription deletes the row.
-    check('form: unsubscription removes the subscription', !$error && $ok && (string)emailOnlyActive('f2unsub') !== '1', (string)$error);
+    check('form: unsubscription removes the subscription', !$error && $ok && (string)emailOnlyActive('e2unsub') !== '1', (string)$error);
+
+    newsletterForm(email('e3optout'), '0');
+    newsletterForm(email('e4deact'), '0');
+    // Deactivated straight in the database, with no hook: only the Odoo cron can see it.
+    Db::getInstance()->update('emailsubscription', array('active' => 0), 'email = "' . pSQL(email('e4deact')) . '"');
 
     createCustomer('c9unsub', 1, 0);
     list($error, $ok) = newsletterForm(email('c9unsub'), '1');
@@ -273,7 +249,6 @@ if ($phase === 'verify') {
     check('c8: customer who used the newsletter block kept both consents',
         $c && (int)$c->newsletter === 1 && (int)$c->optin === 1,
         $c ? "newsletter={$c->newsletter} optin={$c->optin}" : 'customer not found');
-    check('f1: address subscribed through the form is still active', (string)emailOnlyActive('f1sub') === '1');
 }
 
 if ($phase === 'cleanup') {
