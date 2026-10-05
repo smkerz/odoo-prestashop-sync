@@ -13,6 +13,7 @@ from odoo.tools import html_escape
 
 from .prestashop_client import PrestaShopClient, PrestaShopAPIError, USER_AGENT
 from . import consent_rules
+from . import notify_rules
 import requests
 
 _logger = logging.getLogger(__name__)
@@ -217,9 +218,28 @@ class PrestashopBackend(models.Model):
     sync_alert_mail_date = fields.Datetime(readonly=True, copy=False)
     alert_email = fields.Char(
         string="Alert email",
-        help="If set, an email is sent to this address when a sync is aborted or an automatic push is "
-             "blocked by the safety limit (at most one email per 24 hours for this backend).",
+        help="Address of the person who runs the shops. Alerts and activity summaries are sent to it, "
+             "according to 'Email notifications'. They only carry counters, never customer data.",
     )
+    notify_level = fields.Selection(
+        notify_rules.LEVELS,
+        string="Email notifications",
+        default="daily",
+        required=True,
+        help="Alerts: a sync was aborted, an automatic push was blocked by the safety limit, or a wave of "
+             "opt-outs was recorded (at most one alert email per 24 hours and per cause).\n"
+             "Daily summary: one email a day with what changed, sent even when nothing did, so that a "
+             "missing email means the connector is not running.\n"
+             "Hourly summary: one email at most every hour, only when something changed.",
+    )
+    mass_unsub_alert_threshold = fields.Integer(
+        string="Opt-outs per hour triggering an alert",
+        default=10,
+        help="An alert email is sent when more opt-outs than this are recorded on one list within an hour, "
+             "whatever their origin (sync, webhooks). 0 = no alert.",
+    )
+    last_digest_date = fields.Datetime(readonly=True, copy=False)
+    volume_alert_date = fields.Datetime(readonly=True, copy=False)
 
     include_guest_customers = fields.Boolean(
         default=True,
@@ -323,15 +343,97 @@ class PrestashopBackend(models.Model):
         if self.sync_alert_kind != kind:
             vals["sync_alert_date"] = now
         mailed_recently = self.sync_alert_mail_date and self.sync_alert_mail_date > now - timedelta(hours=24)
-        if self.alert_email and not mailed_recently:
-            self.env["mail.mail"].sudo().create({
-                "subject": f"[PrestaShop connector] {self.name}: {message}",
-                "body_html": f"<p>{html_escape(message)}</p><p>Backend: {html_escape(self.name)}</p>",
-                "email_to": self.alert_email,
-                "email_from": self.company_id.partner_id.email_formatted or False,
-            })
+        if self.alert_email and notify_rules.sends_alerts(self.notify_level) and not mailed_recently:
+            self._send_operator_mail(
+                f"[PrestaShop connector] {self.name}: {message}",
+                f"<p>{html_escape(message)}</p><p>Backend: {html_escape(self.name)}</p>",
+            )
             vals["sync_alert_mail_date"] = now
         self.write(vals)
+
+    def _send_operator_mail(self, subject, body_html, email_to=None):
+        """Email the operator right away. Counters and messages only: no customer data."""
+        company = self[:1].company_id or self.env.company
+        mail = self.env["mail.mail"].sudo().create({
+            "subject": subject,
+            "body_html": body_html,
+            "email_to": email_to or self[:1].alert_email,
+            "email_from": company.partner_id.email_formatted or False,
+        })
+        mail.send(raise_exception=False)
+
+    def _subscription_model(self):
+        """Return the model holding the list subscriptions of mailing contacts, or None."""
+        MailingContact = self.env["mailing.contact"].sudo()
+        fname = self._discover_subscription_field(MailingContact)
+        return self.env[MailingContact._fields[fname].comodel_name].sudo() if fname else None
+
+    def _activity_since(self, since):
+        """Counters of what changed for this backend since a datetime (see notify_rules.COUNTERS)."""
+        self.ensure_one()
+        stats = {key: 0 for key, _label in notify_rules.COUNTERS}
+        Subscription = self._subscription_model()
+        if Subscription is not None:
+            out_date = "opt_out_datetime" if "opt_out_datetime" in Subscription._fields else "write_date"
+            for key, kind in (("newsletter", "newsletter"), ("offers", "offers")):
+                list_id = self._ensure_mailing_list(kind).id
+                stats[key + "_subscribed"] = Subscription.search_count(
+                    [("list_id", "=", list_id), ("opt_out", "=", False), ("create_date", ">=", since)])
+                stats[key + "_opted_out"] = Subscription.search_count(
+                    [("list_id", "=", list_id), ("opt_out", "=", True), (out_date, ">=", since)])
+        stats["new_customers"] = self.env["prestashop.customer.map"].sudo().search_count(
+            [("backend_id", "=", self.id), ("create_date", ">=", since)])
+        Log = self.env["prestashop.sync.log"].sudo()
+        recent = [("backend_id", "=", self.id), ("create_date", ">=", since)]
+        stats["errors"] = Log.search_count(recent + [("status", "=", "error")])
+        pushed = re.compile(r"updated_customers=(\d+); email_only_unsub=(\d+)")
+        for log in Log.search(recent + [("operation", "=", "sync_consents_odoo_to_prestashop"),
+                                        ("message", "like", "updated_customers=")]):
+            match = pushed.search(log.message or "")
+            if match:
+                stats["revoked_in_shop"] += int(match.group(1)) + int(match.group(2))
+        return stats
+
+    def _check_unusual_volume(self, now):
+        """Email the operator when a wave of opt-outs was recorded during the last hour."""
+        self.ensure_one()
+        if self.volume_alert_date and self.volume_alert_date > now - timedelta(hours=1):
+            return
+        stats = self._activity_since(now - timedelta(hours=1))
+        count = notify_rules.unusual_volume(stats, self.mass_unsub_alert_threshold)
+        if not count:
+            return
+        label = "Newsletter" if stats["newsletter_opted_out"] >= stats["offers_opted_out"] else "Offres partenaires"
+        subject, html = notify_rules.render_volume_alert(self.name, count, self.mass_unsub_alert_threshold, label)
+        self._send_operator_mail(subject, html)
+        self.volume_alert_date = now
+        self._log("sync_email_marketing", "warning",
+                  f"Unusual volume: {count} opt-outs of the {label} list within an hour. Alert email sent.")
+
+    @api.model
+    def cron_send_notifications(self):
+        """Hourly: alert on a wave of opt-outs, then send the summaries that are due."""
+        now = fields.Datetime.now()
+        digests = {}
+        for backend in self.search([("alert_email", "!=", False), ("notify_level", "!=", "none")]):
+            try:
+                backend._check_unusual_volume(now)
+                if backend.notify_level not in ("daily", "each"):
+                    continue
+                since = backend.last_digest_date or now - timedelta(hours=24)
+                stats = backend._activity_since(since)
+                if notify_rules.digest_due(backend.notify_level, now, backend.last_digest_date,
+                                           notify_rules.has_activity(stats)):
+                    digests.setdefault(backend.alert_email, []).append(
+                        {"name": backend.name, "since": since, "stats": stats})
+                    backend.last_digest_date = now
+            except Exception as e:
+                backend._log("sync_email_marketing", "error", "Notifications: failed to prepare the summary",
+                             details=str(e))
+        # One email per recipient, with a section per shop
+        for email_to, sections in digests.items():
+            subject, html = notify_rules.render_digest(sections, now)
+            self._send_operator_mail(subject, html, email_to=email_to)
 
     def _clear_alert(self, kind):
         """Remove the banner once the operation that raised it works again."""
@@ -1380,11 +1482,10 @@ class PrestashopBackend(models.Model):
 
     def _list_subscriptions(self, list_rec, emails, opt_out):
         """Return the subscriptions of `emails` to a mailing list, opted out or not."""
-        MailingContact = self.env["mailing.contact"].sudo()
-        fname = self._discover_subscription_field(MailingContact)
-        if not fname or not emails:
+        Subscription = self._subscription_model()
+        if Subscription is None or not emails:
             return []
-        return self.env[MailingContact._fields[fname].comodel_name].sudo().search([
+        return Subscription.search([
             ("list_id", "=", list_rec.id),
             ("opt_out", "=", opt_out),
             ("contact_id.email_normalized", "in", list(emails)),

@@ -61,4 +61,16 @@
         <field name="numbercall">-1</field>
     </record>
 
+    <!-- Active from the start: it only sends emails to backends that have an alert address -->
+    <record id="ir_cron_prestashop_notifications" model="ir.cron">
+        <field name="name">PrestaShop: Notifications (alerts and summaries)</field>
+        <field name="model_id" ref="model_prestashop_backend"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_send_notifications()</field>
+        <field name="active">True</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">hours</field>
+        <field name="numbercall">-1</field>
+    </record>
+
 </odoo>
