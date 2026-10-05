@@ -155,6 +155,22 @@ if PHASE == "check":
 
     # Blacklisting pushes by itself, in real time (no explicit push here on purpose).
     env["mail.blacklist"].sudo()._add(email("c7black"))
+    # --- notifications -----------------------------------------------------------
+    stats = backend._activity_since(datetime.now() - timedelta(hours=1))
+    print("activity over the last hour: %s" % stats)
+    check("activity counters see the run",
+          stats["new_customers"] >= 9 and stats["newsletter_opted_out"] >= 5 and stats["revoked_in_shop"] >= 4, str(stats))
+    saved = backend.read(["alert_email", "notify_level", "last_digest_date", "volume_alert_date", "mass_unsub_alert_threshold"])[0]
+    recipient = "e2e-%s-operator@example.invalid" % TAG
+    backend.write({"alert_email": recipient, "notify_level": "each", "last_digest_date": datetime.now() - timedelta(hours=1),
+                   "volume_alert_date": False, "mass_unsub_alert_threshold": 3})
+    env["prestashop.backend"].cron_send_notifications()
+    subjects = env["mail.mail"].sudo().search([("email_to", "=", recipient)]).mapped("subject")
+    check("a summary email was prepared for the operator", any("Résumé" in (x or "") for x in subjects), str(subjects))
+    check("a wave of opt-outs triggers an alert email", any("désinscriptions en une heure" in (x or "") for x in subjects), str(subjects))
+    env["mail.mail"].sudo().search([("email_to", "=", recipient)]).unlink()
+    backend.write({k: saved[k] for k in ("alert_email", "notify_level", "last_digest_date", "volume_alert_date", "mass_unsub_alert_threshold")})
+
     env.cr.commit()
     print('Next: run e2e_shop.php with "verify".')
 

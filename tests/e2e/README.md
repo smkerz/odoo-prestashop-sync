@@ -70,6 +70,10 @@ Each step prints `PASS` / `FAIL` lines and ends with `OK` or the number of failu
 | e3optout | Newsletter subscription opted out | email-only row deactivated |
 | c1news, c2offers, e1sub | nothing | unchanged |
 
+The Odoo step also checks the notifications: the activity counters of the run, the
+summary email and the alert on a wave of opt-outs (emails are prepared, not delivered,
+on a test database whose mail servers are disabled).
+
 The newsletter form scenarios call the code of `ps_emailsubscription` directly
 (what the footer form runs); they need the captcha module (`eicaptcha`) disabled
 on the test shop.
