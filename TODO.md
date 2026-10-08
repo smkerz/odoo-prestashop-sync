@@ -1,7 +1,7 @@
 # TODO
 
 Liste de travail du connecteur PrestaShop ↔ Odoo et du module PrestaShop `prestashopodoo`.
-Mise à jour le 4 octobre 2026. Aucune donnée personnelle ne doit figurer dans ce fichier.
+Mise à jour le 5 octobre 2026. Aucune donnée personnelle ne doit figurer dans ce fichier.
 
 Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 
@@ -22,7 +22,7 @@ Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 
 | # | Sujet | Ce qu'il faut faire |
 |---|---|---|
-| 8 | Alerte de synchro : à l'usage | Depuis la 17.0.1.0.84, une synchro abandonnée est journalisée en erreur, affiche une alerte rouge sur le backend et peut envoyer un e-mail (champ « Alert email », au plus un par 24 heures). Renseigner cette adresse sur chaque backend, et vérifier à la première occasion que l'e-mail arrive bien |
+| 8 | Notifications par e-mail : à l'usage | Depuis la 17.0.1.0.85, chaque backend envoie à l'adresse « Alert email » des alertes (synchro abandonnée, push bloqué, plus de 10 désinscriptions en une heure) et un résumé chiffré, selon le niveau choisi dans l'onglet Customers. Vérifier que le premier résumé quotidien arrive, puis que les chiffres restent cohérents sur une semaine. Un jour sans résumé signifie que le connecteur ne tourne plus |
 | 9 | Plafond Presta → Odoo | Refuser une synchro qui désinscrirait une part anormale d'une liste en un passage, comme le fait déjà le push Odoo → Presta (`opt_out_push_max_per_run`) |
 | 11 | Deux comptes reliés à la même fiche | Quand deux comptes PrestaShop pointent vers le même contact Odoo, l'adresse e-mail du contact suit le dernier compte modifié |
 | 12 | Backend sans client importé | `_sync_email_marketing_lists` sort avant de traiter les inscrits par e-mail seul quand aucun client n'est encore importé |
@@ -97,7 +97,7 @@ Comment lire le résultat :
 - **Une erreur « push aborted … revocations exceed the limit »** signifie que le plafond de sécurité a bloqué un envoi anormal vers une boutique : ne pas forcer avec le bouton, chercher d'abord la cause avec « Preview ».
 - **Repères au 5 octobre 2026**, clients abonnés à la newsletter dans les boutiques : `.com` environ 170, `.fr` 70, `.hair` 161. Une chute brutale de l'un de ces chiffres est le signe d'un incident.
 
-Les erreurs « Failed to sync consents to PrestaShop. » sont exclues de la seconde requête : ce sont les comptes en double connus (point 10).
+Les erreurs « Failed to sync consents to PrestaShop. » sont exclues de la seconde requête : elles venaient des comptes en double, traités depuis la 17.0.1.0.84 et le module PrestaShop 1.3.3. À confirmer au prochain export des logs, puis retirer cette exclusion.
 
 ---
 
