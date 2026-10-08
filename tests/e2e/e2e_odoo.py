@@ -159,7 +159,8 @@ if PHASE == "check":
     stats = backend._activity_since(datetime.now() - timedelta(hours=1))
     print("activity over the last hour: %s" % stats)
     check("activity counters see the run",
-          stats["new_customers"] >= 9 and stats["newsletter_opted_out"] >= 5 and stats["revoked_in_shop"] >= 4, str(stats))
+          stats["new_customers"] >= 9 and stats["newsletter_subscribed"] >= 5 and stats["offers_subscribed"] >= 2
+          and stats["newsletter_opted_out"] >= 5 and stats["revoked_in_shop"] >= 4, str(stats))
     saved = backend.read(["alert_email", "notify_level", "last_digest_date", "volume_alert_date", "mass_unsub_alert_threshold"])[0]
     recipient = "e2e-%s-operator@example.invalid" % TAG
     backend.write({"alert_email": recipient, "notify_level": "each", "last_digest_date": datetime.now() - timedelta(hours=1),

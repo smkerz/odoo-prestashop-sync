@@ -792,6 +792,19 @@ class PrestashopBackend(models.Model):
                 return sub
         return None
 
+    def _subscribe(self, mc, list_rec):
+        """Add a mailing contact to a list.
+
+        Through a subscription record rather than list_ids: the many2many write inserts
+        the row without create_date, so the new subscriber never shows in the summaries.
+        """
+        Subscription = self._subscription_model()
+        if Subscription is None:
+            mc.write({"list_ids": [(4, list_rec.id)]})
+            return
+        Subscription.create({"contact_id": mc.id, "list_id": list_rec.id})
+        mc.invalidate_recordset()
+
     def _blacklisted_emails(self, emails):
         """Return set of normalized emails that are blacklisted in Odoo (mail.blacklist)."""
         blacklisted = set()
@@ -1047,7 +1060,7 @@ class PrestashopBackend(models.Model):
 
                     if list_rec not in mc.list_ids:
                         if not preview:
-                            mc.write({"list_ids": [(4, list_rec.id)]})
+                            self._subscribe(mc, list_rec)
                         subscribe_actions += 1
                     else:
                         skipped += 1
@@ -1311,7 +1324,7 @@ class PrestashopBackend(models.Model):
                 if sub is not None and hasattr(sub, "opt_out") and sub.opt_out:
                     sub.write({"opt_out": False})
                 if list_rec not in mc.list_ids:
-                    mc.write({"list_ids": [(4, list_rec.id)]})
+                    self._subscribe(mc, list_rec)
             else:
                 if sub is not None and hasattr(sub, "opt_out"):
                     if not sub.opt_out:
