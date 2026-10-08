@@ -43,7 +43,8 @@ def digest_due(level, now, last_digest, has_activity):
     each: whenever something changed since the previous summary.
     """
     if level == "daily":
-        return last_digest is None or now - last_digest >= DAILY_PERIOD
+        # Odoo reads an empty Datetime field as False, not None
+        return not last_digest or now - last_digest >= DAILY_PERIOD
     if level == "each":
         return bool(has_activity)
     return False

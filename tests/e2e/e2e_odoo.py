@@ -163,7 +163,7 @@ if PHASE == "check":
           and stats["newsletter_opted_out"] >= 5 and stats["revoked_in_shop"] >= 4, str(stats))
     saved = backend.read(["alert_email", "notify_level", "last_digest_date", "volume_alert_date", "mass_unsub_alert_threshold"])[0]
     recipient = "e2e-%s-operator@example.invalid" % TAG
-    backend.write({"alert_email": recipient, "notify_level": "each", "last_digest_date": datetime.now() - timedelta(hours=1),
+    backend.write({"alert_email": recipient, "notify_level": "daily", "last_digest_date": False,
                    "volume_alert_date": False, "mass_unsub_alert_threshold": 3})
     env["prestashop.backend"].cron_send_notifications()
     subjects = env["mail.mail"].sudo().search([("email_to", "=", recipient)]).mapped("subject")
