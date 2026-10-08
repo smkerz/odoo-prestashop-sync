@@ -4,8 +4,9 @@
 Pure functions on plain values (no ORM), so they can be tested without Odoo:
     python tests/test_notify_rules.py
 
-The emails are written in French, for the people who run the shops. They only
-carry counters: never a customer name or address.
+The emails are written in French, for the people who run the shops. Summaries
+can list the addresses behind each counter (option of the backend); alerts only
+carry counters.
 """
 from datetime import timedelta
 from html import escape
@@ -29,6 +30,9 @@ COUNTERS = [
 ]
 
 DAILY_PERIOD = timedelta(hours=23, minutes=30)
+
+# Lines listed under a counter, at most (a robot cleanup can opt out hundreds of rows)
+DETAILS_SHOWN = 50
 
 
 def sends_alerts(level):
@@ -66,21 +70,37 @@ def _when(value):
     return value.strftime("%d/%m/%Y %H:%M") + " UTC"
 
 
+def _details(lines):
+    shown = ", ".join(escape(line) for line in lines[:DETAILS_SHOWN])
+    if len(lines) > DETAILS_SHOWN:
+        shown += " … et %s autres" % (len(lines) - DETAILS_SHOWN)
+    return "<tr><td colspan=\"2\" style=\"padding:0 0 8px 16px;color:#555;font-size:90%%\">%s</td></tr>" % shown
+
+
 def render_digest(sections, now):
-    """Return (subject, html) of a summary. sections: [{"name", "since", "stats"}, ...]."""
+    """Return (subject, html) of a summary.
+
+    sections: [{"name", "since", "stats", "details"}, ...]; details (optional) maps a
+    counter to the lines listed under it: addresses, or error messages.
+    """
     quiet = not any(has_activity(section["stats"]) for section in sections)
     subject = "[Connecteur PrestaShop] Résumé du %s%s" % (
         now.strftime("%d/%m/%Y"), " : aucun changement" if quiet else "")
-    parts = ["<p>Résumé de l'activité du connecteur PrestaShop. Chiffres uniquement, sans donnée de client.</p>"]
+    with_addresses = any(section.get("details", {}).get(key)
+                         for section in sections for key, _label in COUNTERS if key != "errors")
+    parts = ["<p>Résumé de l'activité du connecteur PrestaShop. %s</p>" % (
+        "Ce message contient des adresses de clients : ne le transférez pas." if with_addresses
+        else "Chiffres uniquement, sans donnée de client.")]
     for section in sections:
         parts.append("<h3>%s</h3>" % escape(section["name"]))
         parts.append("<p>Depuis le %s</p>" % _when(section["since"]))
         if not has_activity(section["stats"]):
             parts.append("<p>Aucun changement.</p>")
             continue
+        details = section.get("details", {})
         rows = "".join(
-            "<tr><td>%s</td><td style=\"text-align:right;padding-left:16px\"><strong>%s</strong></td></tr>"
-            % (label, section["stats"].get(key, 0))
+            "<tr><td>%s</td><td style=\"text-align:right;padding-left:16px\"><strong>%s</strong></td></tr>%s"
+            % (label, section["stats"].get(key, 0), _details(details[key]) if details.get(key) else "")
             for key, label in COUNTERS if section["stats"].get(key)
         )
         parts.append("<table>%s</table>" % rows)

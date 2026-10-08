@@ -67,6 +67,28 @@ class TestRendering(unittest.TestCase):
         self.assertNotIn("Inscriptions aux offres partenaires", html)
         self.assertIn("Aucun changement.", html)
 
+    def test_digest_without_details_says_counters_only(self):
+        _subject, html = rules.render_digest([{"name": "shop", "since": NOW, "stats": BUSY}], NOW)
+        self.assertIn("sans donnée de client", html)
+
+    def test_digest_lists_the_details_under_their_counter(self):
+        details = {"new_customers": ["a@x.test", "<b>@x.test"], "errors": ["Boom (×3)"]}
+        _subject, html = rules.render_digest(
+            [{"name": "shop", "since": NOW, "stats": BUSY, "details": details}], NOW)
+        self.assertIn("a@x.test, &lt;b&gt;@x.test", html)
+        self.assertIn("ne le transférez pas", html)
+        self.assertLess(html.index("Nouveaux clients"), html.index("a@x.test"))
+        self.assertLess(html.index("a@x.test"), html.index("Désinscriptions de la newsletter"))
+        self.assertNotIn("Boom", html)  # errors listed only when the counter is shown
+
+    def test_long_lists_are_cut(self):
+        many = ["c%03d@x.test" % i for i in range(rules.DETAILS_SHOWN + 7)]
+        _subject, html = rules.render_digest(
+            [{"name": "shop", "since": NOW, "stats": BUSY, "details": {"newsletter_opted_out": many}}], NOW)
+        self.assertIn("c049@x.test", html)
+        self.assertNotIn("c050@x.test", html)
+        self.assertIn("et 7 autres", html)
+
     def test_quiet_digest_says_so_in_the_subject(self):
         subject, _html = rules.render_digest([{"name": "shop", "since": NOW, "stats": QUIET}], NOW)
         self.assertTrue(subject.endswith("aucun changement"))

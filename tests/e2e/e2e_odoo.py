@@ -161,16 +161,19 @@ if PHASE == "check":
     check("activity counters see the run",
           stats["new_customers"] >= 9 and stats["newsletter_subscribed"] >= 5 and stats["offers_subscribed"] >= 2
           and stats["newsletter_opted_out"] >= 5 and stats["revoked_in_shop"] >= 4, str(stats))
-    saved = backend.read(["alert_email", "notify_level", "last_digest_date", "volume_alert_date", "mass_unsub_alert_threshold"])[0]
+    saved = backend.read(["alert_email", "notify_level", "last_digest_date", "volume_alert_date", "mass_unsub_alert_threshold", "notify_include_emails"])[0]
     recipient = "e2e-%s-operator@example.invalid" % TAG
     backend.write({"alert_email": recipient, "notify_level": "daily", "last_digest_date": False,
-                   "volume_alert_date": False, "mass_unsub_alert_threshold": 3})
+                   "volume_alert_date": False, "mass_unsub_alert_threshold": 3, "notify_include_emails": True})
     env["prestashop.backend"].cron_send_notifications()
     subjects = env["mail.mail"].sudo().search([("email_to", "=", recipient)]).mapped("subject")
     check("a summary email was prepared for the operator", any("Résumé" in (x or "") for x in subjects), str(subjects))
+    bodies = "".join(env["mail.mail"].sudo().search([("email_to", "=", recipient)]).mapped("body_html"))
+    check("the summary lists the addresses (new subscriber, opt-out)",
+          email("c1news") in bodies and email("c3toggle") in bodies)
     check("a wave of opt-outs triggers an alert email", any("désinscriptions en une heure" in (x or "") for x in subjects), str(subjects))
     env["mail.mail"].sudo().search([("email_to", "=", recipient)]).unlink()
-    backend.write({k: saved[k] for k in ("alert_email", "notify_level", "last_digest_date", "volume_alert_date", "mass_unsub_alert_threshold")})
+    backend.write({k: saved[k] for k in ("alert_email", "notify_level", "last_digest_date", "volume_alert_date", "mass_unsub_alert_threshold", "notify_include_emails")})
 
     env.cr.commit()
     print('Next: run e2e_shop.php with "verify".')
