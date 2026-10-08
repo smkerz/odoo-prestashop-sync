@@ -40,7 +40,7 @@ Syncs customers, addresses, and marketing consents (newsletter / partner offers)
 
 ### Alerts
 - When a consent sync is aborted (PrestaShop API not answering) or an automatic push is blocked by the safety limit, the backend shows a red banner and its line turns red in the list
-- Email notifications per backend (alert address + level): alerts only, daily summary, or hourly summary when something changed. A wave of opt-outs within an hour always raises an alert. Emails carry counters only, never customer data
+- Email notifications per backend (alert address + level): alerts only, daily summary, or hourly summary when something changed. A wave of opt-outs within an hour always raises an alert. Summaries can list the addresses behind each counter and the error messages (option, on by default); alerts carry counters only
 
 ### Webhooks
 - HMAC-SHA256 signature verification on all endpoints

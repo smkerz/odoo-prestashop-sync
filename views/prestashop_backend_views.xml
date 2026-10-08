@@ -404,7 +404,7 @@
                                         <li><strong>Verrou PostgreSQL</strong> : si un cron est déjà en cours, le suivant est automatiquement ignoré (pas de double exécution).</li>
                                         <li><strong>Odoo → Presta est revocation-only</strong> : il ne réabonne jamais un contact dans PrestaShop, il ne fait que désinscrire.</li>
                                         <li><strong>Odoo → Presta ne désinscrit que sur un signal explicite</strong> : désinscription d'une liste ou liste noire dans Odoo. Un contact simplement absent d'une liste Odoo n'est jamais désinscrit dans PrestaShop.</li>
-                                        <li><strong>Notifications par e-mail</strong> (onglet Customers) : alertes seules, résumé quotidien, ou résumé horaire quand quelque chose a changé. Une vague de désinscriptions en une heure déclenche toujours une alerte. Les e-mails ne contiennent que des chiffres.</li>
+                                        <li><strong>Notifications par e-mail</strong> (onglet Customers) : alertes seules, résumé quotidien, ou résumé horaire quand quelque chose a changé. Une vague de désinscriptions en une heure déclenche toujours une alerte. Le résumé liste les adresses derrière chaque chiffre et les messages d'erreur (case « Addresses in summaries », à décocher pour n'avoir que des chiffres) ; les alertes ne contiennent que des chiffres.</li>
                                         <li><strong>Plafond du push automatique</strong> : au-delà du nombre de révocations réglé dans l'onglet Customers (25 par défaut), le cron n'envoie rien et journalise une erreur. Le bouton « Preview » affiche le volume, le bouton « Odoo → Presta » l'applique sans plafond.</li>
                                         <li><strong>respect_odoo_opt_out</strong> : si activé, les contacts blacklistés/opt-out dans Odoo ne seront jamais réinscrits par le sync Presta → Odoo.</li>
                                     </ul>
@@ -459,6 +459,7 @@
                                     <separator string="Notifications"/>
                                     <field name="alert_email" widget="email"/>
                                     <field name="notify_level"/>
+                                    <field name="notify_include_emails"/>
                                     <field name="mass_unsub_alert_threshold"/>
                                     <separator string="Addresses"/>
                                     <field name="last_address_sync" readonly="1"/>

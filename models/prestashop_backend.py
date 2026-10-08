@@ -219,7 +219,13 @@ class PrestashopBackend(models.Model):
     alert_email = fields.Char(
         string="Alert email",
         help="Address of the person who runs the shops. Alerts and activity summaries are sent to it, "
-             "according to 'Email notifications'. They only carry counters, never customer data.",
+             "according to 'Email notifications'.",
+    )
+    notify_include_emails = fields.Boolean(
+        string="Addresses in summaries",
+        default=True,
+        help="List the addresses behind each counter of the summaries (new customers, subscriptions, "
+             "opt-outs), and the error messages. Untick to receive counters only.",
     )
     notify_level = fields.Selection(
         notify_rules.LEVELS,
@@ -368,24 +374,40 @@ class PrestashopBackend(models.Model):
         fname = self._discover_subscription_field(MailingContact)
         return self.env[MailingContact._fields[fname].comodel_name].sudo() if fname else None
 
-    def _activity_since(self, since):
-        """Counters of what changed for this backend since a datetime (see notify_rules.COUNTERS)."""
+    def _activity_since(self, since, details=None):
+        """Counters of what changed for this backend since a datetime (see notify_rules.COUNTERS).
+
+        When `details` is a dict, it is filled with the lines behind each counter:
+        addresses, and error messages with their count.
+        """
         self.ensure_one()
         stats = {key: 0 for key, _label in notify_rules.COUNTERS}
+
+        def count(key, records, email_of):
+            stats[key] = len(records)
+            if details is not None:
+                details[key] = sorted({email_of(rec) for rec in records if email_of(rec)})
+
         Subscription = self._subscription_model()
         if Subscription is not None:
             out_date = "opt_out_datetime" if "opt_out_datetime" in Subscription._fields else "write_date"
             for key, kind in (("newsletter", "newsletter"), ("offers", "offers")):
                 list_id = self._ensure_mailing_list(kind).id
-                stats[key + "_subscribed"] = Subscription.search_count(
-                    [("list_id", "=", list_id), ("opt_out", "=", False), ("create_date", ">=", since)])
-                stats[key + "_opted_out"] = Subscription.search_count(
-                    [("list_id", "=", list_id), ("opt_out", "=", True), (out_date, ">=", since)])
-        stats["new_customers"] = self.env["prestashop.customer.map"].sudo().search_count(
-            [("backend_id", "=", self.id), ("create_date", ">=", since)])
+                count(key + "_subscribed", Subscription.search(
+                    [("list_id", "=", list_id), ("opt_out", "=", False), ("create_date", ">=", since)]),
+                    lambda sub: sub.contact_id.email)
+                count(key + "_opted_out", Subscription.search(
+                    [("list_id", "=", list_id), ("opt_out", "=", True), (out_date, ">=", since)]),
+                    lambda sub: sub.contact_id.email)
+        count("new_customers", self.env["prestashop.customer.map"].sudo().search(
+            [("backend_id", "=", self.id), ("create_date", ">=", since)]), lambda m: m.partner_id.email)
         Log = self.env["prestashop.sync.log"].sudo()
         recent = [("backend_id", "=", self.id), ("create_date", ">=", since)]
-        stats["errors"] = Log.search_count(recent + [("status", "=", "error")])
+        errors = Log.read_group(recent + [("status", "=", "error")], ["message"], ["message"])
+        stats["errors"] = sum(group["message_count"] for group in errors)
+        if details is not None:
+            details["errors"] = [f"{group['message']} (×{group['message_count']})"
+                                 for group in sorted(errors, key=lambda g: -g["message_count"])]
         pushed = re.compile(r"updated_customers=(\d+); email_only_unsub=(\d+)")
         for log in Log.search(recent + [("operation", "=", "sync_consents_odoo_to_prestashop"),
                                         ("message", "like", "updated_customers=")]):
@@ -421,11 +443,12 @@ class PrestashopBackend(models.Model):
                 if backend.notify_level not in ("daily", "each"):
                     continue
                 since = backend.last_digest_date or now - timedelta(hours=24)
-                stats = backend._activity_since(since)
+                details = {} if backend.notify_include_emails else None
+                stats = backend._activity_since(since, details)
                 if notify_rules.digest_due(backend.notify_level, now, backend.last_digest_date,
                                            notify_rules.has_activity(stats)):
                     digests.setdefault(backend.alert_email, []).append(
-                        {"name": backend.name, "since": since, "stats": stats})
+                        {"name": backend.name, "since": since, "stats": stats, "details": details or {}})
                     backend.last_digest_date = now
             except Exception as e:
                 backend._log("sync_email_marketing", "error", "Notifications: failed to prepare the summary",
