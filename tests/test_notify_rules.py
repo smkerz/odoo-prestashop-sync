@@ -21,6 +21,7 @@ BUSY = dict(QUIET, new_customers=3, newsletter_opted_out=2)
 class TestDigestDue(unittest.TestCase):
     def test_daily_is_sent_once_a_day_even_without_activity(self):
         self.assertTrue(rules.digest_due("daily", NOW, None, False))
+        self.assertTrue(rules.digest_due("daily", NOW, False, False))  # empty Odoo field
         self.assertTrue(rules.digest_due("daily", NOW, NOW - timedelta(hours=24), False))
         self.assertFalse(rules.digest_due("daily", NOW, NOW - timedelta(hours=5), True))
 
