@@ -4,3 +4,9 @@ __pycache__/
 
 # local database backups: never commit
 /! Pb Save DB/
+
+# Customer data and one-off scripts: never in the repository
+*.csv
+!security/*.csv
+*.txt
+/_*.py
