@@ -1,7 +1,7 @@
 # TODO
 
 Liste de travail du connecteur PrestaShop ↔ Odoo et du module PrestaShop `prestashopodoo`.
-Mise à jour le 5 octobre 2026. Aucune donnée personnelle ne doit figurer dans ce fichier.
+Mise à jour le 29 octobre 2026. Aucune donnée personnelle ne doit figurer dans ce fichier.
 
 Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 
@@ -11,7 +11,7 @@ Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 
 | # | Sujet | Ce qu'il faut faire | Qui |
 |---|---|---|---|
-| 2 bis | Contrôle des inscriptions et désinscriptions en masse | Vérifier vers le 19 octobre 2026, puis début novembre, qu'aucune vague anormale d'inscriptions ou de désinscriptions n'est apparue depuis la remise en route du 4 octobre. Requêtes et repères : voir « Contrôle périodique » en bas de ce fichier | Exploitation, puis dev |
+| 2 bis | Contrôle des inscriptions et désinscriptions en masse | Premier contrôle fait le 29 octobre : aucune erreur en 15 jours, un résumé chaque jour, deux vagues le 11 octobre (30 sur le `.fr`, 22 sur le `.com`), toutes deux des lignes « e-mail seul » désactivées dans les boutiques, alerte reçue. Refaire début novembre avec les requêtes de « Contrôle périodique » | Exploitation, puis dev |
 | 3 | Sauvegardes locales | Sortir du dépôt le dossier de sauvegardes de la base (exclu de git, mais présent dans le dossier de travail) | Exploitation |
 | 4 | Dépôts GitHub | Décider de leur visibilité : ils sont publics et contiennent des fichiers d'adresses | Exploitation |
 | 5 | Clé d'API du `.hair` | La régénérer et la mettre à jour dans le backend Odoo : elle est apparue en clair dans des logs | Exploitation |
@@ -22,7 +22,7 @@ Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 
 | # | Sujet | Ce qu'il faut faire |
 |---|---|---|
-| 8 | Notifications par e-mail : à l'usage | Depuis la 17.0.1.0.85, chaque backend envoie à l'adresse « Alert email » des alertes (synchro abandonnée, push bloqué, plus de 10 désinscriptions en une heure) et un résumé chiffré, selon le niveau choisi dans l'onglet Customers. Vérifier que le premier résumé quotidien arrive, puis que les chiffres restent cohérents sur une semaine. Un jour sans résumé signifie que le connecteur ne tourne plus |
+| 8 | Robots sur les formulaires newsletter | Les résumés montrent encore des inscriptions de robots, surtout sur le `.hair` (adresses Gmail truffées de points, presque une par jour). Vérifier le captcha du formulaire newsletter du `.hair`, puis faire un nettoyage. Le robot de Google Shopping (`storebotmail.joonix.net`) crée aussi des comptes clients sur le `.com` : à exclure de l'import, ou à laisser |
 | 9 | Plafond Presta → Odoo | Refuser une synchro qui désinscrirait une part anormale d'une liste en un passage, comme le fait déjà le push Odoo → Presta (`opt_out_push_max_per_run`) |
 | 11 | Deux comptes reliés à la même fiche | Quand deux comptes PrestaShop pointent vers le même contact Odoo, l'adresse e-mail du contact suit le dernier compte modifié |
 | 12 | Backend sans client importé | `_sync_email_marketing_lists` sort avant de traiter les inscrits par e-mail seul quand aucun client n'est encore importé |
@@ -95,7 +95,7 @@ Comment lire le résultat :
 - **Une ligne à 5 désinscriptions ou plus à la même minute** est suspecte : de vraies personnes ne se désinscrivent pas ensemble. Exception connue : une campagne envoyée peu avant, qui provoque des désinscriptions étalées sur plusieurs minutes, pas concentrées sur une seule.
 - **Une ligne à 5 inscriptions ou plus à la même minute** signale soit un import de clients (normal après un rattrapage), soit une vague de robots sur le formulaire newsletter.
 - **Une erreur « push aborted … revocations exceed the limit »** signifie que le plafond de sécurité a bloqué un envoi anormal vers une boutique : ne pas forcer avec le bouton, chercher d'abord la cause avec « Preview ».
-- **Repères au 5 octobre 2026**, clients abonnés à la newsletter dans les boutiques : `.com` environ 170, `.fr` 70, `.hair` 161. Une chute brutale de l'un de ces chiffres est le signe d'un incident.
+- **Repères au 29 octobre 2026**, abonnés actifs des listes newsletter dans Odoo (clients et inscrits par e-mail seul) : `.com` 287, `.fr` 149, `.hair` 167 (troisième requête ci-dessus). Une chute brutale de l'un de ces chiffres est le signe d'un incident. Les repères notés le 5 octobre (170, 70, 161) ne comptaient que les clients des boutiques.
 
 Les erreurs « Failed to sync consents to PrestaShop. » sont exclues de la seconde requête : elles venaient des comptes en double, traités depuis la 17.0.1.0.84 et le module PrestaShop 1.3.3. À confirmer au prochain export des logs, puis retirer cette exclusion.
 
