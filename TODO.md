@@ -22,7 +22,7 @@ Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 
 | # | Sujet | Ce qu'il faut faire |
 |---|---|---|
-| 8 | Robots sur les formulaires newsletter | Les résumés montrent encore des inscriptions de robots, surtout sur le `.hair` (adresses Gmail truffées de points, presque une par jour). Vérifier le captcha du formulaire newsletter du `.hair`, puis faire un nettoyage. Le robot de Google Shopping (`storebotmail.joonix.net`) crée aussi des comptes clients sur le `.com` : à exclure de l'import, ou à laisser |
+| 8 | Robots sur les formulaires newsletter | Les résumés montrent encore des inscriptions de robots, surtout sur le `.hair` (adresses Gmail truffées de points, presque une par jour). Le captcha du `.hair` était désactivé : réactivé le 29 octobre (reCAPTCHA v3, newsletter protégée, script vérifié sur la page publique). Surveiller les résumés quelques jours, puis nettoyer les robots déjà inscrits. Le robot de Google Shopping (`storebotmail.joonix.net`) crée aussi des comptes clients sur le `.com` : à exclure de l'import, ou à laisser |
 | 9 | Plafond Presta → Odoo | Refuser une synchro qui désinscrirait une part anormale d'une liste en un passage, comme le fait déjà le push Odoo → Presta (`opt_out_push_max_per_run`) |
 | 11 | Deux comptes reliés à la même fiche | Quand deux comptes PrestaShop pointent vers le même contact Odoo, l'adresse e-mail du contact suit le dernier compte modifié |
 | 12 | Backend sans client importé | `_sync_email_marketing_lists` sort avant de traiter les inscrits par e-mail seul quand aucun client n'est encore importé |
