@@ -13,10 +13,9 @@ Environnement de test, procédure et scénarios : voir `tests/e2e/README.md`.
 |---|---|---|---|
 | 2 bis | Contrôle des inscriptions et désinscriptions en masse | Premier contrôle fait le 29 octobre : aucune erreur en 15 jours, un résumé chaque jour, deux vagues le 11 octobre (30 sur le `.fr`, 22 sur le `.com`), toutes deux des lignes « e-mail seul » désactivées dans les boutiques, alerte reçue. Refaire début novembre avec les requêtes de « Contrôle périodique » | Exploitation, puis dev |
 | 3 | Sauvegardes locales | Sortir du dépôt le dossier de sauvegardes de la base (exclu de git, mais présent dans le dossier de travail) | Exploitation |
-| 4 | Dépôts GitHub | Décider de leur visibilité : ils sont publics et contiennent des fichiers d'adresses | Exploitation |
+| 4 | Publication sur Odoo Apps | Les dépôts restent publics. La branche `17.0` (lue par Odoo Apps) contient la version de septembre, dans un sous-dossier : la remettre à jour à partir de `main` avant de publier | Dev |
 | 5 | Clé d'API du `.hair` | La régénérer et la mettre à jour dans le backend Odoo : elle est apparue en clair dans des logs | Exploitation |
 | 6 | Secret webhook | Le changer s'il correspond à la valeur restée dans l'historique du dépôt du module PrestaShop | Exploitation |
-| 7 | Fichiers de données dans le dépôt | Retirer `bounces.csv`, `blacklist_import.csv`, `hard_bounces.txt` et les scripts ponctuels `_*.py`, y compris de l'historique | Dev, après le point 4 |
 
 ## 2. Fiabilité du connecteur
 
