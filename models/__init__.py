@@ -1,3 +1,4 @@
+from . import bounce_rules
 from . import consent_rules
 from . import notify_rules
 from . import prestashop_client
@@ -5,5 +6,6 @@ from . import prestashop_backend
 from . import prestashop_mappings
 from . import prestashop_log
 from . import prestashop_reimport_customer_wizard
+from . import bounce_blacklist
 from . import mailing_contact_extend
 from . import res_partner_extend
